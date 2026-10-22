@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Taller de Remeras 3D</title>
+    <meta name="description" content="Simulador 3D de remeras artesanales: elegí la tela, cortá, cosé, planchá y estampá tu propio diseño." />
+    <meta name="theme-color" content="#2b2420" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/steps/inicio.css" />
+    <link rel="stylesheet" href="css/steps/materiales.css" />
+    <link rel="stylesheet" href="css/steps/molde.css" />
+    <link rel="stylesheet" href="css/steps/prelavado.css" />
+    <link rel="stylesheet" href="css/steps/tizado.css" />
+    <link rel="stylesheet" href="css/steps/corte.css" />
+    <link rel="stylesheet" href="css/steps/costura.css" />
+    <link rel="stylesheet" href="css/steps/planchado.css" />
+    <link rel="stylesheet" href="css/steps/diseno.css" />
+    <link rel="stylesheet" href="css/steps/estampar.css" />
+    <link rel="stylesheet" href="css/steps/terminaciones.css" />
+    <link rel="stylesheet" href="css/steps/final.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.min.js",
+          "three/addons/": "./vendor/three/addons/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="Taller 3D"></canvas>
+
+      <header id="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">✂</span>
+          <span class="brand-name">Taller de Remeras</span>
+        </div>
+        <nav id="stepper" aria-label="Pasos del proceso"></nav>
+        <div class="top-actions">
+          <span id="cost-pill" class="pill" title="Costo acumulado de materiales">💰 $0</span>
+          <button id="btn-mute" class="icon-btn" title="Sonido" aria-label="Sonido">🔊</button>
+          <button id="btn-help" class="icon-btn" title="Cómo jugar" aria-label="Ayuda">?</button>
+          <button id="btn-menu" class="icon-btn" title="Menú" aria-label="Menú">☰</button>
+        </div>
+      </header>
+
+      <aside id="panel" class="panel hidden" aria-live="polite">
+        <button id="panel-toggle" class="panel-toggle" aria-label="Mostrar u ocultar panel"><span></span></button>
+        <div class="panel-head">
+          <div class="panel-kicker" id="panel-kicker"></div>
+          <h2 id="panel-title"></h2>
+          <p id="panel-sub"></p>
+        </div>
+        <div class="panel-body" id="panel-body"></div>
+        <div class="panel-foot" id="panel-foot"></div>
+      </aside>
+
+      <div id="hud" aria-live="polite"></div>
+      <div id="hint" aria-live="polite"></div>
+      <div id="toasts"></div>
+      <div id="overlay"></div>
+      <div id="modal-root"></div>
+
+      <div id="loading">
+        <div class="loading-spool" aria-hidden="true"></div>
+        <div class="loading-text">Preparando el taller…</div>
+      </div>
+
+      <noscript>
+        <div class="noscript">Este juego necesita JavaScript para funcionar.</div>
+      </noscript>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
