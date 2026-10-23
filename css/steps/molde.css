@@ -1,1 +1,593 @@
-/* Estilos del paso: molde */
+/* ==========================================================
+   Paso: Talle y molde (prefijo .molde- / .mld-)
+   ========================================================== */
+
+/* ---------- Hoja de moldería (SVG) ---------- */
+.molde-sheet-wrap {
+  position: relative;
+  margin: 6px 0 4px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #2c5e4d;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18), 0 6px 18px rgba(43, 36, 32, 0.16);
+  cursor: zoom-in;
+}
+
+.mld-sheet {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+.mld-hand {
+  font-family: 'Segoe Print', 'Bradley Hand', 'Marker Felt', 'Chalkboard SE', 'Comic Sans MS', var(--font);
+  fill: #3a2410;
+  font-weight: 800;
+  paint-order: stroke;
+  stroke: var(--mld-paper, #d9bb8c);
+  stroke-width: 0.7px;
+  stroke-linejoin: round;
+}
+
+.mld-name,
+.mld-sub {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: rotate(-1.4deg);
+}
+
+.mld-name {
+  letter-spacing: 0.25px;
+}
+
+.mld-sub {
+  fill: #5a3b1d;
+  font-weight: 600;
+}
+
+.mld-grain-txt {
+  fill: #4a2f14;
+  letter-spacing: 0.4px;
+}
+
+.mld-mat-nums text {
+  font-family: var(--font);
+}
+
+.mld-mat-brand {
+  font-family: var(--font);
+  font-weight: 800;
+}
+
+.mld-piece {
+  cursor: pointer;
+}
+
+.mld-piece-body {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.18s ease;
+}
+
+.mld-piece.hover .mld-piece-body,
+.mld-piece:hover .mld-piece-body {
+  transform: translate(-0.5px, -1px) rotate(-0.6deg);
+}
+
+.mld-piece .mld-shadow2 {
+  transition: opacity 0.18s;
+  opacity: 0.8;
+}
+
+.mld-piece.hover .mld-shadow2,
+.mld-piece:hover .mld-shadow2 {
+  opacity: 1.6;
+  transform: translate(1.4px, 2.2px);
+}
+
+.mld-piece.hover .mld-cut,
+.mld-piece:hover .mld-cut {
+  stroke: #9b3b24;
+}
+
+.mld-animate .mld-piece {
+  animation: mld-drop 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes mld-drop {
+  from {
+    opacity: 0;
+    transform: translate(3px, -9px) rotate(-4deg) scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.mld-stamp {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mld-stamp 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+
+.mld-stamp-txt {
+  font-family: var(--font);
+}
+
+@keyframes mld-stamp {
+  from {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+  to {
+    opacity: 0.92;
+    transform: scale(1);
+  }
+}
+
+.molde-sheet-zoom {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 252, 247, 0.9);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.molde-sheet-cap {
+  min-height: 19px;
+  margin: 6px 2px 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.molde-sheet-cap b {
+  color: var(--ink);
+}
+
+.molde-sheet-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 2px 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+.molde-sheet-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  margin-right: 5px;
+  vertical-align: middle;
+  border-top: 2px solid #3f2611;
+}
+
+.molde-sheet-legend i.seam {
+  border-top: 2px dashed #6b4521;
+}
+
+.molde-sheet-legend i.grain {
+  border-top: 2px solid #4a2f14;
+  position: relative;
+}
+
+.molde-sheet-legend i.grain::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: -5px;
+  border: 4px solid transparent;
+  border-left: 6px solid #4a2f14;
+}
+
+.molde-modal-sheet .molde-sheet-wrap {
+  cursor: default;
+}
+
+/* ---------- Panel ---------- */
+.molde-panel .ui-section {
+  margin-bottom: 12px;
+}
+
+.molde-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin-right: 2px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  text-indent: 0;
+  vertical-align: 1px;
+  background: var(--good);
+}
+
+.molde-mark.no {
+  background: var(--bad);
+}
+
+.molde-mark.mid {
+  background: var(--warn);
+}
+
+.result-notes li:has(> .molde-mark:first-child) {
+  list-style: none;
+  margin-left: -18px;
+  padding-left: 21px;
+  text-indent: -21px;
+}
+
+.molde-badge {
+  position: absolute;
+  top: -7px;
+  right: -4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+/* talles: etiquetas tejidas */
+.molde-sizes {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.molde-size {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 8px 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px 6px 10px 10px;
+  background:
+    repeating-linear-gradient(90deg, rgba(43, 36, 32, 0.035) 0 1px, transparent 1px 3px),
+    var(--card-solid);
+  cursor: pointer;
+  transition: transform 0.12s, background 0.15s, border-color 0.15s;
+}
+
+.molde-size::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 60%;
+  height: 0;
+  transform: translateX(-50%);
+  border-top: 1px dashed rgba(43, 36, 32, 0.22);
+}
+
+.molde-size:hover {
+  transform: translateY(-1px);
+  border-color: var(--ink-3);
+}
+
+.molde-size-id {
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.molde-size-sub {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.molde-size.selected {
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 3px),
+    var(--ink);
+  border-color: var(--ink);
+}
+
+.molde-size.selected::before {
+  border-top-color: rgba(255, 255, 255, 0.35);
+}
+
+.molde-size.selected .molde-size-id {
+  color: #fff8ef;
+}
+
+.molde-size.selected .molde-size-sub {
+  color: rgba(255, 248, 239, 0.75);
+}
+
+.molde-fitline {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* tarjetas de calce / mangas / cuello con la silueta */
+.molde-cards {
+  display: grid;
+  gap: 6px;
+}
+
+.molde-cards.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.molde-cards.cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.molde-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  padding: 6px 8px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-solid);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  --mld-icon-fill: #f2e6d2;
+  color: #6b5444;
+}
+
+.molde-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+}
+
+.molde-card-icon {
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+}
+
+.molde-card-name {
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.molde-card-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  line-height: 1.2;
+}
+
+.molde-card.selected {
+  border-color: var(--accent);
+  background: #fff6f2;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  --mld-icon-fill: #f6d9d1;
+  color: var(--accent);
+}
+
+/* pedido */
+.molde-order {
+  margin: 2px 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fffdf5;
+  border: 1px dashed var(--accent-soft);
+  font-size: 13px;
+}
+
+.molde-order-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.molde-order-avatar {
+  font-size: 22px;
+}
+
+.molde-order-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-weight: 700;
+}
+
+.molde-order-list li.ok {
+  color: var(--good);
+}
+
+.molde-order-list li.no {
+  color: var(--bad);
+}
+
+.molde-order-free {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+}
+
+/* consumo de tela */
+.molde-fabric {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  align-items: baseline;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--paper);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.molde-fabric > b {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.molde-fabric small {
+  grid-column: 1 / -1;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+
+.molde-measures .prop-table {
+  margin-top: 2px;
+}
+
+.molde-tape-toggle {
+  margin-top: 4px;
+}
+
+.molde-tips .ui-note {
+  font-size: 12.5px;
+}
+
+/* ---------- Cintas métricas sobre la remera ---------- */
+.molde-tape {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+  transition: none;
+}
+
+.molde-tape-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.molde-tape-svg polyline {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: butt;
+}
+
+.molde-tape-edge {
+  stroke: #9c7418;
+  stroke-width: 11;
+  opacity: 0.85;
+}
+
+.molde-tape-band {
+  stroke: #f4cf52;
+  stroke-width: 9;
+}
+
+.molde-tape-ticks {
+  stroke: #3b2f1c;
+  stroke-width: 3.5;
+  opacity: 0.75;
+}
+
+.molde-tape-ticks10 {
+  stroke: #c0392b;
+  stroke-width: 8.5;
+  opacity: 0.85;
+}
+
+.molde-tape-tip {
+  fill: #c9ccd2;
+  stroke: #6d7074;
+  stroke-width: 1.4;
+}
+
+.molde-tape-label {
+  position: absolute;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(43, 36, 32, 0.88);
+  color: #fff8ef;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: opacity 0.25s;
+}
+
+.molde-tape-label.side-up {
+  transform: translate(-50%, calc(-100% - 10px));
+}
+
+.molde-tape-label.side-right {
+  transform: translate(12px, -50%);
+}
+
+@media (max-width: 820px) {
+  .molde-sizes {
+    gap: 4px;
+  }
+
+  .molde-size-id {
+    font-size: 15px;
+  }
+
+  .molde-card {
+    grid-template-columns: 30px 1fr;
+    padding: 5px 6px 5px 4px;
+  }
+
+  .molde-card .mld-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .molde-card-sub {
+    display: none;
+  }
+
+  .molde-tape-label {
+    font-size: 11px;
+    padding: 2px 7px;
+  }
+
+  .molde-tape-edge {
+    stroke-width: 8;
+  }
+
+  .molde-tape-band {
+    stroke-width: 6.5;
+  }
+
+  .molde-tape-ticks10 {
+    stroke-width: 6;
+  }
+}
+
+@media (max-width: 820px) {
+  .panel.molde-step #panel-sub {
+    display: none;
+  }
+}

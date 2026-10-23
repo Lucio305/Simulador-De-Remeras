@@ -65,7 +65,7 @@ function updateShirt() {
   if (shirt.pattern !== pattern) shirt.setPattern(pattern);
   const fabric = catalog.fabricById(state.fabric.id);
   shirt.setFabric(fabric, state.fabric.color, !!state.fabric.heather);
-  shirt.setThreadColor(state.thread.color);
+  shirt.setThreadColor(state.thread.color, state.thread.id);
 }
 
 // Ubica la remera en un lugar predefinido. where: 'preview' | 'exhibicion' | 'oculta'

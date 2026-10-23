@@ -128,9 +128,9 @@ export function createOverlock({ position, topY, ry = 0 }) {
     setSpeed(v) {
       target = clamp(v, 0, 1);
     },
-    setThreadColor(hex) {
+    setThreadColor(hex, threadId = 'nylon') {
       color = hex;
-      for (const c of cones) c.material = getThreadMaterial(hex, 'nylon', { repeat: [3, 60] });
+      for (const c of cones) c.material = getThreadMaterial(hex, threadId, { repeat: [3, 60] });
       lineMat.color.set(hex);
     },
     update(dt) {

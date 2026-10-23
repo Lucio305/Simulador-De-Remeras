@@ -344,9 +344,9 @@ export function createSewingMachine({ needle, topY, ry = 0 }) {
     setSpeed(v) {
       speedTarget = clamp(v, 0, 1);
     },
-    setThreadColor(hex) {
+    setThreadColor(hex, threadId = 'poliester') {
       threadColor = hex;
-      spoolThread.material = getThreadMaterial(hex, 'poliester');
+      spoolThread.material = getThreadMaterial(hex, threadId);
       threadMat.color.set(hex);
     },
     setLight(on) {

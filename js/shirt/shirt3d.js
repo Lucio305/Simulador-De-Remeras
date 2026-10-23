@@ -99,7 +99,7 @@ export class Shirt3D {
       foldOuter: getFabricMaterial(id, this.color, { heather: h }),
       foldInner: getFabricMaterial(id, inner, { heather: h }),
       rib: getRibMaterial(id, this.color, { heather: h }),
-      thread: getThreadMaterial(this.threadColor),
+      thread: getThreadMaterial(this.threadColor, this.threadId || 'poliester'),
     };
     const f = this.fabric;
     this._sharpF = !f.knit ? 1.35 : f.weave === 'modal' || f.weave === 'mesh' ? 0.55 : 0.8;
@@ -529,10 +529,11 @@ export class Shirt3D {
     for (const side of SIDES) if (this._prints[side]) this._rebuildPrint(side);
   }
 
-  setThreadColor(hex) {
+  setThreadColor(hex, threadId = this.threadId) {
     if (!hex) return;
     this.threadColor = hex;
-    this._mat.thread = getThreadMaterial(hex);
+    this.threadId = threadId || 'poliester';
+    this._mat.thread = getThreadMaterial(hex, this.threadId);
     this._applyMaterials();
   }
 
@@ -681,6 +682,9 @@ export class Shirt3D {
     if (side !== 'frente' && side !== 'espalda') return;
     this._prints[side] = print ? { print, placement: { x: 0, y: -0.25, width: 0.25, rotation: 0, ...(placement || {}) } } : null;
     this._rebuildPrint(side);
+  }
+  hasPrint(side) {
+    return !!this._prints?.[side];
   }
   setPrintWear({ fade = 0, crack = 0 } = {}) {
     this._wear = { fade: clamp(fade), crack: clamp(crack) };

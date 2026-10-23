@@ -1,1 +1,533 @@
-/* Estilos del paso: prelavado */
+/* ==========================================================
+   Paso: Prelavado (prefijo .prela-)
+   ========================================================== */
+
+.prela-panel .ui-section {
+  margin-bottom: 12px;
+}
+
+.prela-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin-right: 2px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  text-indent: 0;
+  vertical-align: 1px;
+  background: var(--good);
+}
+
+.prela-mark.no {
+  background: var(--bad);
+}
+
+.prela-mark.mid {
+  background: var(--warn);
+}
+
+.result-notes li:has(> .prela-mark:first-child) {
+  list-style: none;
+  margin-left: -18px;
+  padding-left: 21px;
+  text-indent: -21px;
+}
+
+/* ficha de la tela */
+.prela-fab {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.prela-fab-sw {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08), var(--shadow-sm);
+}
+
+.prela-fab-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.prela-fab-text b {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.prela-fab-shrink {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* carga */
+.prela-load-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prela-load {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.35;
+}
+
+.prela-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px dashed var(--line-strong);
+  color: #fff;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.prela-check.ok {
+  border: none;
+  background: var(--good);
+}
+
+/* perilla de temperatura */
+.prela-dial-wrap {
+  display: flex;
+  justify-content: center;
+  margin: -4px 0 0;
+}
+
+.prela-dial {
+  width: min(250px, 100%);
+  height: auto;
+  touch-action: none;
+  outline: none;
+  overflow: visible;
+}
+
+.prela-dial:focus-visible {
+  filter: drop-shadow(0 0 0 2px var(--teal));
+}
+
+.prela-dial-lab {
+  font-size: 15px;
+  font-weight: 800;
+  fill: var(--ink-3);
+  transition: fill 0.15s;
+}
+
+.prela-dial-stop {
+  cursor: pointer;
+}
+
+.prela-dial-stop:hover .prela-dial-lab {
+  fill: var(--ink);
+}
+
+.prela-dial-stop.on .prela-dial-lab {
+  fill: var(--ink);
+  font-size: 17px;
+}
+
+.prela-dial-knob {
+  cursor: grab;
+}
+
+.prela-dial-knob:active {
+  cursor: grabbing;
+}
+
+.prela-dial-val {
+  font-size: 19px;
+  font-weight: 900;
+  font-family: var(--font);
+}
+
+.prela-dial.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.prela-temp-cap {
+  margin: 0 2px 6px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--paper);
+  border-left: 4px solid var(--ink-3);
+  transition: border-color 0.2s;
+}
+
+.prela-temp-cap.t0 {
+  border-left-color: #4f8fd6;
+}
+
+.prela-temp-cap.t30 {
+  border-left-color: #5fb3c9;
+}
+
+.prela-temp-cap.t40 {
+  border-left-color: #e2b23a;
+}
+
+.prela-temp-cap.t60 {
+  border-left-color: #e07a32;
+}
+
+.prela-temp-cap.t90 {
+  border-left-color: #c8382b;
+}
+
+.prela-rule-btn {
+  border: none;
+  background: none;
+  padding: 2px 2px;
+  color: var(--teal);
+  font-weight: 800;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.prela-rule-btn:hover {
+  text-decoration: underline;
+}
+
+.prela-rule {
+  display: none;
+  margin: 4px 0 2px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--teal-soft);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.prela-rule.open {
+  display: block;
+  animation: prela-in 0.25s ease both;
+}
+
+.prela-rule p {
+  margin: 0 0 4px;
+}
+
+.prela-rule ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@keyframes prela-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* centrifugado */
+.prela-spin {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.prela-spin-btn,
+.prela-dry-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 8px 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-solid);
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.prela-spin-btn:hover,
+.prela-dry-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+}
+
+.prela-spin-btn b,
+.prela-dry-btn b {
+  font-size: 14px;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.prela-spin-btn small,
+.prela-dry-btn small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.prela-spin-ico {
+  display: inline-block;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.prela-spin-btn.selected .prela-spin-ico {
+  animation: prela-spin var(--spd, 1.5s) linear infinite;
+}
+
+@keyframes prela-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.prela-spin-btn.selected,
+.prela-dry-btn.selected {
+  border-color: var(--accent);
+  background: #fff6f2;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* secado */
+.prela-dry {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.prela-dry-ico {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.prela-controls {
+  transition: opacity 0.25s;
+}
+
+.prela-controls.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.prela-skip {
+  width: 100%;
+  margin-top: 2px;
+  color: var(--ink-3);
+}
+
+.prela-skip-modal p {
+  margin: 0 0 8px;
+}
+
+.panel.prela-step .panel-foot .btn-auto {
+  flex: 1.25;
+}
+
+/* etiquetas sobre la escena */
+.prela-label {
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 6px));
+  animation: prela-bob 1.6s ease-in-out infinite;
+}
+
+.prela-label-sock {
+  background: rgba(192, 57, 43, 0.92);
+}
+
+@keyframes prela-bob {
+  0%,
+  100% {
+    margin-top: 0;
+  }
+  50% {
+    margin-top: -4px;
+  }
+}
+
+/* HUD del lavarropas */
+.prela-hud {
+  min-width: 210px;
+}
+
+.prela-hud-prog {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-bottom: 2px;
+}
+
+.prela-hud-time {
+  font-family: 'JetBrains Mono', 'Courier New', ui-monospace, monospace;
+  color: #1d6b5c;
+}
+
+.prela-hud .meter {
+  margin: 6px 0 8px;
+}
+
+.prela-hud-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+}
+
+.prela-hud-steps li {
+  position: relative;
+  padding-left: 20px;
+}
+
+.prela-hud-steps li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+}
+
+.prela-hud-steps li.now {
+  color: var(--ink);
+}
+
+.prela-hud-steps li.now::before {
+  border-color: var(--teal);
+  background: var(--teal);
+  animation: prela-pulse 0.9s ease-in-out infinite;
+}
+
+.prela-hud-steps li.done {
+  color: var(--good);
+}
+
+.prela-hud-steps li.done::before {
+  content: '✓';
+  border: none;
+  top: 0;
+  left: 1px;
+  width: auto;
+  height: auto;
+  font-size: 12px;
+}
+
+@keyframes prela-pulse {
+  50% {
+    box-shadow: 0 0 0 4px rgba(47, 111, 106, 0.2);
+  }
+}
+
+@media (max-width: 820px) {
+  .panel.prela-step #panel-sub {
+    display: none;
+  }
+
+  .prela-fab {
+    padding: 8px 10px;
+  }
+
+  .prela-fab-sw {
+    width: 42px;
+    height: 42px;
+  }
+
+  .prela-dial {
+    width: min(240px, 100%);
+  }
+
+  .prela-hud {
+    min-width: 0;
+  }
+
+  .prela-hud-steps {
+    display: none;
+  }
+}
+
+/* sol del secado al sol (sobre la escena) */
+.prela-sun {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 12;
+  transition: opacity 0.6s;
+}
+
+.prela-sun.out {
+  opacity: 0;
+}
+
+.prela-sun-core {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  font-size: 44px;
+  filter: drop-shadow(0 0 14px rgba(255, 196, 80, 0.9));
+  animation: prela-sun-in 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+}
+
+.prela-sun-rays {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 150px;
+  height: 150px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 214, 120, 0.55) 0 18%, rgba(255, 214, 120, 0) 60%),
+    repeating-conic-gradient(from 0deg, rgba(255, 210, 110, 0.35) 0 8deg, rgba(255, 210, 110, 0) 8deg 30deg);
+  -webkit-mask: radial-gradient(circle, #000 30%, transparent 70%);
+  mask: radial-gradient(circle, #000 30%, transparent 70%);
+  animation: prela-rays 9s linear infinite;
+}
+
+@keyframes prela-rays {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes prela-sun-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
