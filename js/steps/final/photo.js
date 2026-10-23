@@ -131,7 +131,8 @@ export function thumbnailDataURL(engine, shirt, height = 256) {
 }
 
 // Renderiza una foto en alta (sube el pixel ratio un momento) y la arma como polaroid.
-export function polaroidCanvas(engine, shirt, { title = '', line1 = '', line2 = '', stamp = '', score = null } = {}) {
+// `stars` (0..5, de a media) se dibuja después de line1, igual que las estrellas del panel.
+export function polaroidCanvas(engine, shirt, { title = '', line1 = '', line2 = '', stamp = '', score = null, stars = null } = {}) {
   const renderer = engine.renderer;
   const pr0 = renderer.getPixelRatio();
   const cssW = renderer.domElement.clientWidth || window.innerWidth;
@@ -200,7 +201,10 @@ export function polaroidCanvas(engine, shirt, { title = '', line1 = '', line2 = 
   g.fillText(fit(g, title, textW), pad, ty);
   g.font = `600 30px ${sans}`;
   g.fillStyle = '#5d5049';
-  g.fillText(fit(g, line1, textW), pad, ty + 48);
+  const starW = stars != null ? 5 * 32 + 18 : 0;
+  const l1 = fit(g, line1, textW - starW);
+  g.fillText(l1, pad, ty + 48);
+  if (stars != null) drawStars(g, pad + g.measureText(l1).width + 22, ty + 48 - 11, 15, stars);
   g.font = `500 25px ${sans}`;
   g.fillStyle = '#8c7d73';
   g.fillText(fit(g, line2, textW), pad, ty + 86);
@@ -212,6 +216,36 @@ export function polaroidCanvas(engine, shirt, { title = '', line1 = '', line2 = 
   // escarapela con la nota
   if (score != null) rosette(g, W - pad - 80, pad + PH + 92, 68, score);
   return c;
+}
+
+// Cinco estrellas vectoriales (llenas, medias o vacías) centradas en la línea y.
+function drawStars(g, x, y, r, value) {
+  const star = (cx) => {
+    g.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const rr = i % 2 ? r * 0.45 : r;
+      g.lineTo(cx + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    g.closePath();
+  };
+  for (let i = 0; i < 5; i++) {
+    const cx = x + r + i * (r * 2 + 2);
+    star(cx);
+    g.fillStyle = '#e4d6c3';
+    g.fill();
+    const fillK = Math.max(0, Math.min(1, value - i));
+    if (fillK > 0) {
+      g.save();
+      g.beginPath();
+      g.rect(cx - r, y - r, r * 2 * fillK, r * 2);
+      g.clip();
+      star(cx);
+      g.fillStyle = '#d9a43b';
+      g.fill();
+      g.restore();
+    }
+  }
 }
 
 function fit(g, text, maxW) {

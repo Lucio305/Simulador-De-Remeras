@@ -7,6 +7,7 @@ import { processPrint, renderPreset } from '../print/printEngine.js';
 import { PROCESS } from './final/process.js';
 import { loadCollection, removeShirt, showCollectionItem } from './final/collection.js';
 import { tapeSVG, stitchSVG, buttonSVG, stringSVG } from './inicio/decor.js';
+import { findShirtSlot, unionRect } from './inicio/framing.js';
 
 const LS_BRAND = 'taller:marca';
 const LS_LAST = 'taller:ultimoCliente';
@@ -150,19 +151,27 @@ export default {
       }
       cta.innerHTML = mode === 'libre' ? '<span>Abrir el taller</span><b>→</b>' : '<span>Ver el pedido</span><b>→</b>';
     };
+    const selectMode = (id) => {
+      if (mode !== id) audio.play('select');
+      mode = id;
+      lsSet(LS_MODE, id);
+      renderMode();
+    };
     const modeCard = (id, icon, title, text, tag) =>
       (modeCards[id] = h(
         'button',
         {
           class: 'ini-mode',
           role: 'radio',
-          onClick: () => {
-            if (mode !== id) audio.play('select');
-            mode = id;
-            lsSet(LS_MODE, id);
-            renderMode();
-          },
+          onClick: () => selectMode(id),
           onDblclick: () => start(),
+          onKeydown: (e) => {
+            if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+            e.preventDefault();
+            const other = id === 'libre' ? 'pedido' : 'libre';
+            selectMode(other);
+            modeCards[other].focus();
+          },
         },
         h('span', { class: 'ini-mode-icon' }, icon),
         h('span', { class: 'ini-mode-text' }, h('b', {}, title), h('small', {}, text)),
@@ -194,6 +203,7 @@ export default {
 
     // Reverso: la orden de trabajo del cliente
     const orderBox = h('div', { class: 'ini-order' });
+    let acceptBtn = null;
     const back = h(
       'div',
       { class: 'ini-face ini-back', 'aria-hidden': 'true' },
@@ -205,7 +215,7 @@ export default {
         h(
           'div',
           { class: 'ini-order-actions' },
-          h('button', { class: 'ini-cta', onClick: () => acceptOrder() }, h('span', {}, '✓ Aceptar pedido'), h('b', {}, '→')),
+          (acceptBtn = h('button', { class: 'ini-cta', onClick: () => acceptOrder() }, h('span', {}, '✓ Aceptar pedido'), h('b', {}, '→'))),
           h(
             'div',
             { class: 'ini-order-row' },
@@ -281,6 +291,13 @@ export default {
       // los botones de la cara oculta no deben recibir foco
       for (const b of front.querySelectorAll('button, input')) b.tabIndex = on ? -1 : 0;
       for (const b of back.querySelectorAll('button')) b.tabIndex = on ? 0 : -1;
+      // y el foco pasa a la cara visible (si no, se seguiría tipeando en el campo oculto)
+      const focusIn = front.contains(document.activeElement) || back.contains(document.activeElement);
+      if (on) {
+        document.activeElement?.blur?.();
+        acceptBtn.focus({ preventScroll: true });
+      } else if (focusIn) cta.focus({ preventScroll: true });
+      ctx.timeout(measure, 60);
     }
     for (const b of back.querySelectorAll('button')) b.tabIndex = -1;
 
@@ -401,58 +418,182 @@ export default {
     ctx.listen(window, 'keydown', (e) => {
       if (leaving || document.querySelector('.modal-wrap')) return;
       if (e.key === 'Escape' && flipped) flip(false);
-      else if (e.key === 'Enter' && e.target === document.body) {
-        e.preventDefault();
-        if (flipped) acceptOrder();
-        else start();
+      else if (e.key === 'Enter' && !e.repeat) {
+        // Enter sobre una tarjeta de modo la elige y arranca (Espacio solo la marca)
+        const card = e.target?.closest?.('.ini-mode');
+        if (card && !flipped) {
+          e.preventDefault();
+          const id = Object.keys(modeCards).find((k) => modeCards[k] === card);
+          if (id) selectMode(id);
+          start();
+        } else if (e.target === document.body || e.target === root) {
+          e.preventDefault();
+          if (flipped) acceptOrder();
+          else start();
+        }
       }
     });
 
-    // ---------- Cámara: recorrido lento alrededor de la exhibición ----------
-    const S = new THREE.Vector3(neck.x, neck.y - 0.36, neck.z);
+    // ---------- Encuadre: la remera de muestra va al hueco libre de la pantalla ----------
+    // Se miden los textos de la izquierda y la etiqueta (posiciones de layout, sin las
+    // animaciones de entrada) y se busca dónde entra la remera más grande sin que nada la
+    // tape: al lado de los textos en pantallas anchas, debajo de la lista en las más chicas.
+    const sil = shirt.pattern?.silhouette?.front?.outline || [];
+    let gx0 = -0.45;
+    let gx1 = 0.45;
+    let gy0 = -0.74;
+    let gy1 = 0;
+    if (sil.length) {
+      gx0 = Math.min(...sil.map((q) => q.x));
+      gx1 = Math.max(...sil.map((q) => q.x));
+      gy0 = Math.min(...sil.map((q) => q.y));
+      gy1 = Math.max(...sil.map((q) => q.y));
+    }
+    gy1 += 0.07; // el cuello del soporte asoma arriba
+    const shirtW = gx1 - gx0;
+    const shirtH = gy1 - gy0;
+    const S = new THREE.Vector3(neck.x + (gx0 + gx1) / 2, neck.y + (gy0 + gy1) / 2, neck.z);
+
+    // velos de papel detrás de los textos (título y lista de pasos), solo en escritorio
+    const veils = [h('div', { class: 'ini-veil' }), h('div', { class: 'ini-veil' })];
+    for (const v of veils.slice().reverse()) root.insertBefore(v, root.firstChild.nextSibling);
+    const layoutRect = (el) => {
+      if (!el || !el.isConnected || el.hidden || !el.offsetWidth) return null;
+      let x = 0;
+      let y = 0;
+      let e = el;
+      while (e && e !== root) {
+        x += e.offsetLeft;
+        y += e.offsetTop;
+        e = e.offsetParent;
+      }
+      if (e !== root) return null;
+      return { x0: x, y0: y, x1: x + el.offsetWidth, y1: y + el.offsetHeight };
+    };
+    const rects = (sel) => [...root.querySelectorAll(sel)].map(layoutRect);
+    const tgt = { nx: 0, ny: 0, d: 2.85, ok: false };
+    const cur = { nx: 0, ny: 0, d: 2.85 };
+    const measure = () => {
+      if (!ctx.alive || !root.isConnected) return;
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      if (!W || !H) return;
+      const mobile = W <= 820;
+      const head = unionRect([...rects('.ini-kicker, .ini-title-small, .ini-title-big, .ini-title-btn, .ini-stitch, .ini-lead')]);
+      const lower = unionRect([...rects('.ini-process .ini-h3, .ini-steps li, .ini-collection:not([hidden]) .ini-h3, .ini-polaroid, .ini-col-more')]);
+      const all = unionRect([head, lower]);
+      const tagR = layoutRect(tag);
+      const obstacles = [head, lower, tagR, layoutRect(muteBtn), layoutRect(root.querySelector('.ini-tape'))];
+      const slot = findShirtSlot({
+        W,
+        H,
+        obstacles,
+        aspect: shirtW / shirtH,
+        sPref: mobile ? clamp(H * 0.3, 150, 300) : clamp(H * 0.32, 170, 380),
+        prefX: !mobile && all && tagR ? (all.x1 + tagR.x0) / 2 : W / 2,
+        margin: mobile ? 8 : 14,
+      });
+      const cam = engine.camera;
+      const tanV = Math.tan((cam.fov * Math.PI) / 360);
+      tgt.nx = clamp((slot.cx / W) * 2 - 1, -0.85, 0.85);
+      tgt.ny = clamp(1 - (slot.cy / H) * 2, -0.85, 0.85);
+      // la remera se ve algo más grande que su silueta plana: tiene volumen (el frente queda
+      // más cerca) y lejos del centro la perspectiva la estira
+      const grow = 1.12 * (1 + (tgt.ny * tanV) ** 2);
+      tgt.d = clamp((shirtH * grow * H) / (slot.s * 2 * tanV), 1.9, 5.2);
+      if (!tgt.ok || tt < 0.2) Object.assign(cur, { nx: tgt.nx, ny: tgt.ny, d: tgt.d });
+      tgt.ok = true;
+      // velo de papel detrás de los textos (solo escritorio: en el celular lo hace el fondo)
+      root.style.setProperty('--ini-slot-y0', `${Math.round(slot.cy - slot.s / 2)}px`);
+      root.style.setProperty('--ini-slot-y1', `${Math.round(slot.cy + slot.s / 2)}px`);
+      [head, lower].forEach((b, i) => {
+        const v = veils[i];
+        v.hidden = mobile || !b;
+        if (v.hidden) return;
+        const pad = 26;
+        Object.assign(v.style, { left: `${b.x0 - pad}px`, top: `${b.y0 - pad}px`, width: `${b.x1 - b.x0 + pad * 2}px`, height: `${b.y1 - b.y0 + pad * 2}px` });
+      });
+      window.__tallerInicioSlot = { ...slot, d: tgt.d, W, H, obstacles };
+    };
+    ctx.listen(window, 'resize', measure);
+    ctx.track(() => delete window.__tallerInicioSlot);
+    requestAnimationFrame(measure);
+    ctx.timeout(measure, 700);
+    ctx.timeout(measure, 2200);
+
+    // Recorrido lento alrededor de la exhibición; una cámara "virtual" calcula hacia dónde
+    // mirar para que la remera caiga justo en el hueco (se corrige cuadro a cuadro).
     const P0 = engine.camera.position.clone();
     const T0 = engine.controls.target.clone();
     const P = new THREE.Vector3();
+    const Tl = new THREE.Vector3();
     const T = new THREE.Vector3();
-    const dir = new THREE.Vector3();
-    let ndcX = 0;
-    let ndcTarget = 0;
-    const measure = () => {
-      const W = window.innerWidth;
-      const lr = left.getBoundingClientRect();
-      const tr = tag.getBoundingClientRect();
-      if (W > 980 && tr.left > lr.right) ndcTarget = clamp(((lr.right + tr.left) / 2 / W) * 2 - 1, -0.5, 0.5);
-      else ndcTarget = 0;
-    };
-    ctx.listen(window, 'resize', measure);
-    requestAnimationFrame(measure);
-    ctx.timeout(measure, 900);
+    const F = new THREE.Vector3();
+    const Rv = new THREE.Vector3();
+    const q = new THREE.Vector3();
+    const UP = THREE.Object3D.DEFAULT_UP;
+    const vcam = new THREE.PerspectiveCamera();
+    const aim = { x: 0, y: 0 };
     let tt = 0;
-    const path = (t) => {
-      const az = 0.16 + 0.46 * Math.sin(t * 0.07);
-      const r = 2.85 + 0.3 * Math.sin(t * 0.051 + 1.2);
-      const y = 1.62 + 0.14 * Math.sin(t * 0.043 + 0.5);
-      P.set(S.x + Math.sin(az) * r, y, S.z + Math.cos(az) * r);
-      T.set(S.x + 0.12 * Math.sin(t * 0.06), S.y + 0.1, S.z - 0.2);
-    };
     ctx.onUpdate((dt) => {
       if (engine.flying) return;
       tt += dt;
-      path(tt + 4);
-      const k = easeInOutCubic(clamp(tt / 3.2));
-      P.lerpVectors(P0, P, k);
-      T.lerpVectors(T0, T, k);
-      // corre el encuadre para que la remera quede en el hueco entre el título y la etiqueta
-      ndcX = lerp(ndcX, ndcTarget, 1 - Math.exp(-dt * 3));
       const cam = engine.camera;
-      const tanH = Math.tan((cam.fov * Math.PI) / 360) * cam.aspect;
-      const yaw = Math.atan(ndcX * tanH) * k;
-      dir.subVectors(T, P).applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
-      cam.position.copy(P);
-      engine.controls.target.copy(P).add(dir);
-      cam.lookAt(engine.controls.target);
+      const kS = 1 - Math.exp(-dt * 2.2);
+      cur.nx = lerp(cur.nx, tgt.nx, kS);
+      cur.ny = lerp(cur.ny, tgt.ny, kS);
+      cur.d = lerp(cur.d, tgt.d, kS);
+      const t = tt + 4;
+      const az = 0.16 + 0.42 * Math.sin(t * 0.07);
+      const r = cur.d * (1 + 0.05 * Math.sin(t * 0.051 + 1.2));
+      const el = 0.17 + 0.05 * Math.sin(t * 0.043 + 0.5);
+      P.set(S.x + Math.sin(az) * Math.cos(el) * r, S.y + Math.sin(el) * r, S.z + Math.cos(az) * Math.cos(el) * r);
+      // vista desde P corrida para que S se proyecte en (cur.nx, cur.ny)
+      if (vcam.fov !== cam.fov || vcam.aspect !== cam.aspect) {
+        vcam.fov = cam.fov;
+        vcam.aspect = cam.aspect;
+        vcam.updateProjectionMatrix();
+      }
+      const tanV = Math.tan((cam.fov * Math.PI) / 360);
+      F.subVectors(S, P);
+      const dist = F.length();
+      F.normalize();
+      Rv.crossVectors(F, UP).normalize();
+      F.applyAxisAngle(Rv, -Math.atan(aim.y * tanV)).applyAxisAngle(UP, Math.atan(aim.x * tanV * cam.aspect));
+      Tl.copy(P).addScaledVector(F, dist);
+      vcam.position.copy(P);
+      vcam.lookAt(Tl);
+      vcam.updateMatrixWorld();
+      q.copy(S).project(vcam);
+      aim.x = clamp(aim.x + (cur.nx - q.x) * 0.85, -0.95, 0.95);
+      aim.y = clamp(aim.y + (cur.ny - q.y) * 0.85, -0.95, 0.95);
+      // al entrar, transición suave desde donde estaba la cámara
+      const k = easeInOutCubic(clamp(tt / 3.2));
+      cam.position.lerpVectors(P0, P, k);
+      T.lerpVectors(T0, Tl, k);
+      engine.controls.target.copy(T);
+      cam.lookAt(T);
       if (teaserOn) shirt.group.rotation.y += dt * 0.28;
     });
+    // ayudas para las pruebas automáticas (el render por software va a 1 fps)
+    this._test = {
+      measure,
+      slot: () => window.__tallerInicioSlot,
+      settle: () => ((tt = Math.max(tt, 3.3)), Object.assign(cur, { nx: tgt.nx, ny: tgt.ny, d: tgt.d })),
+      shirtBox: () => {
+        const b = new THREE.Box3().setFromObject(shirt.group);
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+        for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+          const v = new THREE.Vector3(x, y, z).project(engine.camera);
+          x0 = Math.min(x0, ((v.x + 1) / 2) * W); x1 = Math.max(x1, ((v.x + 1) / 2) * W);
+          y0 = Math.min(y0, ((1 - v.y) / 2) * H); y1 = Math.max(y1, ((1 - v.y) / 2) * H);
+        }
+        const c = S.clone().project(engine.camera);
+        return { x0: Math.round(x0), x1: Math.round(x1), y0: Math.round(y0), y1: Math.round(y1), S: [Math.round(((c.x + 1) / 2) * W), Math.round(((1 - c.y) / 2) * H)], aim, cur, bbox: [b.min.toArray().map((v) => +v.toFixed(2)), b.max.toArray().map((v) => +v.toFixed(2))] };
+      },
+    };
   },
 
   exit() {

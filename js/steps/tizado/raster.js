@@ -85,7 +85,11 @@ export function analyze(pieceMap, placements) {
   }
   const flags = new Map();
   let usedLength = 0;
-  let area = 0;
+  // área cubierta: cada celda cuenta una sola vez aunque la pisen dos moldes (si no, encimar
+  // moldes "subiría" el aprovechamiento)
+  let cells = 0;
+  for (let k = 0; k < count.length; k++) if (count[k]) cells++;
+  const area = cells * CELL * CELL;
   for (const it of items) {
     let overlap = false;
     for (const s of it.runs) {
@@ -94,7 +98,6 @@ export function analyze(pieceMap, placements) {
       if (overlap) break;
     }
     const outside = isOutside(it.b);
-    area += runsArea(it.runs);
     // un molde que quedó fuera de la tela no "estira" el largo usado (es inválido igual)
     if (!outside) usedLength = Math.max(usedLength, it.b.maxX);
     flags.set(it.id, { overlap, outside, selvedge: onSelvedge(it.b), b: it.b, poly: it.poly });

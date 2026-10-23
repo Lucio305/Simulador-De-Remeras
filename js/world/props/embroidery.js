@@ -187,6 +187,10 @@ export function createEmbroideryMachine({ needle, topY, ry = 0 }) {
   return {
     group,
     hoopCenter,
+    // oculta el bastidor de demostración cuando un paso pone una prenda real
+    setDemoVisible(v) {
+      carriage.visible = !!v;
+    },
     setRunning(v) {
       target = clamp(typeof v === 'boolean' ? (v ? 1 : 0) : v, 0, 1);
     },

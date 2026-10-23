@@ -111,6 +111,13 @@ export class Engine {
       this.pointer.buttons = 0;
       dispatch('up', e);
     });
+    // En táctil el navegador puede cancelar el gesto: se trata como soltar.
+    window.addEventListener('pointercancel', (e) => {
+      update(e);
+      this.pointer.down = false;
+      this.pointer.buttons = 0;
+      dispatch('up', e);
+    });
     c.addEventListener('pointerenter', () => (this.pointer.inside = true));
     c.addEventListener('pointerleave', () => (this.pointer.inside = false));
     c.addEventListener('wheel', (e) => dispatch('wheel', e), { passive: true });
@@ -197,6 +204,7 @@ export class Engine {
     c.maxAzimuthAngle = opts.maxAzimuthAngle ?? Infinity;
     c.enablePan = opts.enablePan ?? false;
     c.enableZoom = opts.enableZoom ?? true;
+    c.enableRotate = opts.enableRotate ?? true;
     c.autoRotate = !!opts.autoRotate;
     c.autoRotateSpeed = opts.autoRotateSpeed ?? 1.2;
     c.update();

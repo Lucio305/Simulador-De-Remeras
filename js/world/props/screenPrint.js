@@ -227,6 +227,8 @@ export function createScreenPrint({ position, topY, ry = 0 }) {
     group,
     frameCenter,
     frameSize: [innerW, innerD],
+    // ventana donde drawStencil dibuja el diseño: fracciones del área interna (v desde la bisagra)
+    stencilWindow: { u: 0.2, v: 0.22, w: 0.6, h: 0.5 },
     platenTopY: topY + PLATEN_TOP,
     squeegee: null, // lo asigna el taller
     setFrameDown(t) {

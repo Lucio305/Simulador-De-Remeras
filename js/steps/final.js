@@ -1,7 +1,7 @@
 // Paso final: la remera terminada en el soporte de exhibición, con el informe completo,
 // foto descargable, prueba de lavado, colección y reacción del cliente (modo pedido).
 
-import { clamp, lerp, money, easeInOutCubic, downloadDataURL } from '../core/utils.js';
+import { clamp, lerp, money, easeInOutCubic, downloadDataURL, stars } from '../core/utils.js';
 import { processPrint } from '../print/printEngine.js';
 import { loadCollection, upsertShirt, updateShirtEntry, removeShirt, showCollectionItem } from './final/collection.js';
 import { globalScore, tierFor, scoreColor, stepRows, costBreakdown, orderChecklist, clientVerdict, computeWash } from './final/report.js';
@@ -128,6 +128,20 @@ export default {
     );
     app.appendChild(viewbar);
     ctx.track(() => viewbar.remove());
+    // Centrada en el área libre de la escena (a la izquierda del panel, sea cual sea su ancho).
+    const placeViewbar = () => {
+      // offsetLeft no cambia con la transición de entrada del panel (es un transform)
+      const p = document.getElementById('panel');
+      const free = p && p.offsetWidth && !p.classList.contains('hidden') ? p.offsetLeft : window.innerWidth;
+      viewbar.style.setProperty('--fin-vb-x', `${Math.round(free / 2)}px`);
+    };
+    ctx.listen(window, 'resize', placeViewbar);
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(placeViewbar);
+      const p = document.getElementById('panel');
+      if (p) ro.observe(p);
+      ctx.track(() => ro.disconnect());
+    }
     function showSide(side) {
       if (washAnim) return;
       audio.play('select');
@@ -137,6 +151,7 @@ export default {
       turnTo(side);
     }
     ctx.listen(window, 'keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || washAnim) return;
       if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
       if (document.querySelector('.modal-wrap')) return;
       const k = e.key.toLowerCase();
@@ -207,11 +222,26 @@ export default {
       }
       body.appendChild(ui.section('Ficha técnica', specTable()));
       body.appendChild(ui.section('Costos y precio', costSection()));
-      body.appendChild(ui.section('Prueba de lavado', washSection()));
-      const colSec = collectionSection();
-      if (colSec) body.appendChild(ui.section('Tu colección', colSec));
+      body.appendChild(ui.section('Prueba de lavado', washBox));
+      renderWash();
+      colSecEl = ui.section('Tu colección', colBox);
+      body.appendChild(colSecEl);
+      renderCollection();
       return body;
     };
+    // Las secciones que cambian (lavado y colección) se actualizan solas, sin rearmar el
+    // panel: así la escarapela y las barras no repiten su animación de entrada.
+    const washBox = h('div', { class: 'fin-wash-box' });
+    const colBox = h('div', { class: 'fin-col-box' });
+    let colSecEl = null;
+    function renderWash() {
+      washBox.replaceChildren(washSection());
+    }
+    function renderCollection() {
+      const c = collectionSection();
+      colBox.replaceChildren(...(c ? [c] : []));
+      if (colSecEl) colSecEl.hidden = !c;
+    }
 
     function swatch(hex) {
       return h('span', { class: 'fin-sw', style: { background: hex } });
@@ -301,7 +331,7 @@ export default {
             { class: `fin-budget ${rentable ? 'ok' : 'no'}` },
             h('div', {}, h('small', {}, 'Presupuesto'), h('b', {}, money(verdict.budget))),
             h('div', {}, h('small', {}, 'Tu costo'), h('b', {}, money(costs.total))),
-            h('div', {}, h('small', {}, 'Vale'), h('b', {}, money(costs.price))),
+            h('div', {}, h('small', {}, 'Precio sugerido'), h('b', {}, money(costs.price))),
           ),
         );
       }
@@ -317,7 +347,7 @@ export default {
           'div',
           { class: 'fin-wash-cta' },
           h('p', {}, 'Simulá 10 lavados a máquina para ver si la remera encoge, si la estampa se gasta y si las costuras aguantan.'),
-          h('button', { class: 'btn btn-secondary btn-sm', onClick: () => runWash() }, '🧺 Hacer la prueba de lavado'),
+          h('button', { class: 'btn btn-secondary btn-sm', disabled: !ready || busy, title: ready ? null : 'Esperá a que llegue la cámara', onClick: () => runWash() }, '🧺 Hacer la prueba de lavado'),
         );
       }
       return washSummary(w, false);
@@ -333,7 +363,7 @@ export default {
           icon: '📏',
           title: 'Encogimiento',
           value: w.shrink < 0.004 ? 'Casi nada' : `−${w.lengthLoss.toFixed(1)} cm de largo · −${(w.chestLoss * 2).toFixed(1)} cm de contorno`,
-          note: w.shrinkNote + (w.sizeDown ? ` Ahora calza como talle ${w.sizeDown}.` : ''),
+          note: w.shrinkNote + (w.sizeNote ? ` ${w.sizeNote}` : w.sizeDown ? ` Ahora calza como talle ${w.sizeDown}.` : ''),
         },
         {
           cls: printCls,
@@ -369,7 +399,7 @@ export default {
                     ? null
                     : (x) => {
                         removeShirt(x.id);
-                        refresh();
+                        renderCollection();
                       },
                 });
               },
@@ -383,14 +413,6 @@ export default {
       return h('div', {}, row, h('p', { class: 'col-caption' }, `${list.length} ${list.length === 1 ? 'remera guardada' : 'remeras guardadas'} en este navegador (máx. 12).`));
     }
 
-    const refresh = () => {
-      if (!ctx.alive) return;
-      const bodyEl = document.getElementById('panel-body');
-      const top = bodyEl?.scrollTop || 0;
-      ui.setBody(buildBody());
-      if (bodyEl) bodyEl.scrollTop = top;
-    };
-
     const washed = () => !!state.wash?.done;
     ui.panel({
       kicker: 'Final · Exhibición',
@@ -399,18 +421,20 @@ export default {
       wide: true,
       body: buildBody(),
       actions: [
-        { id: 'photo', label: '📸 Descargar foto', kind: 'secondary', onClick: () => takePhoto() },
-        { id: 'wash', label: washed() ? '🧺 Lavada ✓' : '🧺 Prueba de lavado', kind: 'secondary', disabled: washed(), onClick: () => runWash() },
+        // foto y lavado se habilitan cuando llega la cámara (ver "ready" más abajo)
+        { id: 'photo', label: '📸 Descargar foto', kind: 'secondary', disabled: true, onClick: () => takePhoto() },
+        { id: 'wash', label: washed() ? '🧺 Lavada ✓' : '🧺 Prueba de lavado', kind: 'secondary', disabled: true, onClick: () => runWash() },
         { id: 'new', label: '🔁 Nueva remera', kind: 'primary', onClick: () => ctx.restart() },
       ],
     });
     ui.action('new')?.classList.add('fin-btn-wide');
     for (const id of ['photo', 'wash', 'new']) ui.action(id)?.classList.add('fin-btn');
+    requestAnimationFrame(placeViewbar);
 
     // ---------- Foto ----------
     const sleep = (ms) => new Promise((r) => ctx.timeout(r, ms));
     async function takePhoto() {
-      if (busy || !ctx.alive) return;
+      if (!ready || busy || !ctx.alive) return;
       busy = true;
       app.classList.add('fin-snap');
       await sleep(320);
@@ -419,7 +443,8 @@ export default {
       try {
         const c = polaroidCanvas(engine, shirt, {
           title: state.brand || 'Mi Taller',
-          line1: `${tier.title} · ${'★'.repeat(Math.round((grade / 100) * 5))}${'☆'.repeat(5 - Math.round((grade / 100) * 5))}`,
+          line1: tier.title,
+          stars: stars(grade),
           line2: `${fabric.short} ${colorName.toLowerCase()} · talle ${state.pattern?.size || 'M'}${tech ? ' · ' + tech.name : ''}`,
           stamp: `${new Date().toLocaleDateString('es-AR')} · Taller de Remeras 3D`,
           score: grade,
@@ -455,7 +480,7 @@ export default {
     ctx.track(stopRumble);
 
     async function runWash() {
-      if (busy || washed() || !ctx.alive) return;
+      if (!ready || busy || washed() || !ctx.alive) return;
       busy = true;
       ui.enableAction('wash', false);
       ui.enableAction('photo', false);
@@ -584,9 +609,10 @@ export default {
       ui.updateAction('wash', { label: '🧺 Lavada ✓', disabled: true });
       ui.enableAction('photo', true);
       ui.enableAction('new', true);
-      refresh();
-      engine.setOrbit(orbitOpts());
       busy = false;
+      renderWash();
+      renderCollection();
+      engine.setOrbit(orbitOpts());
       const ba =
         before && after
           ? h(
@@ -662,11 +688,14 @@ export default {
         clientAvatar: state.order?.avatar || null,
         wash: state.wash?.done ? `${state.wash.verdict} (${state.wash.score}/100)` : null,
       });
-      refresh();
+      renderCollection();
     } catch (e) {
       console.warn('colección', e);
     }
     ready = true;
+    ui.enableAction('photo', true);
+    if (!washed()) ui.enableAction('wash', true);
+    renderWash();
     if (grade >= 80) {
       audio.play('fanfare');
       confetti(ctx, app, h);

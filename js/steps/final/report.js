@@ -96,6 +96,15 @@ export function costBreakdown(state, catalog, grade) {
 }
 
 // ---------- Pedido del cliente ----------
+// Primera letra en minúscula para usar un nombre del catálogo en medio de una frase,
+// salvo siglas ("DTF") y nombres que arrancan con dos mayúsculas.
+const lcFirst = (s) => {
+  const t = String(s ?? '');
+  return t.length > 1 && t[1] === t[1].toLowerCase() ? t[0].toLowerCase() + t.slice(1) : t;
+};
+// Nombre "hablado" de una técnica (sin la aclaración entre paréntesis del catálogo).
+const spoken = (name) => lcFirst(String(name || '').replace(/\s*\(.*?\)\s*/g, ' ').trim());
+
 export function orderChecklist(state, catalog) {
   const o = state.order;
   if (!o) return [];
@@ -109,36 +118,83 @@ export function orderChecklist(state, catalog) {
     if (state.fabric?.colorId) return state.fabric.colorId === id;
     return (state.fabric?.color || '').toLowerCase() === c.hex.toLowerCase();
   };
-  const currentColor = () => catalog.colorById(state.fabric?.colorId)?.name || (state.fabric?.color ? `personalizado ${state.fabric.color}` : '—');
+  const curColorId = catalog.colorById(state.fabric?.colorId) ? state.fabric.colorId : null;
+  const currentColor = () => (curColorId ? colorName(curColorId) : state.fabric?.color ? `personalizado ${state.fabric.color}` : '—');
+  const p = state.pattern || {};
   if (r.fabrics) {
-    list.push({ key: 'fabric', icon: '🧶', label: `Tela: ${r.fabrics.map((id) => catalog.fabricById(id)?.short || id).join(' o ')}`, ok: r.fabrics.includes(state.fabric?.id), got: fab?.short || '—' });
+    list.push({ key: 'fabric', icon: '🧶', label: `Tela: ${r.fabrics.map((id) => catalog.fabricById(id)?.short || id).join(' o ')}`, ok: r.fabrics.includes(state.fabric?.id), got: fab?.short || '—', want: r.fabrics, have: state.fabric?.id || null });
   }
-  if (r.color) list.push({ key: 'color', icon: '🎨', label: `Color: ${colorName(r.color)}`, ok: sameColor(r.color), got: currentColor() });
-  if (r.colors) list.push({ key: 'color', icon: '🎨', label: `Color: ${r.colors.map(colorName).join(' o ')}`, ok: r.colors.some(sameColor), got: currentColor() });
-  if (r.size) list.push({ key: 'size', icon: '📏', label: `Talle ${r.size}`, ok: state.pattern?.size === r.size, got: `talle ${state.pattern?.size}` });
-  if (r.fit) list.push({ key: 'fit', icon: '👕', label: `Calce ${catalog.fitById(r.fit)?.name || r.fit}`, ok: state.pattern?.fit === r.fit, got: catalog.fitById(state.pattern?.fit)?.name || '—' });
-  if (r.sleeve) list.push({ key: 'sleeve', icon: '💪', label: catalog.sleeveById(r.sleeve)?.name || r.sleeve, ok: state.pattern?.sleeve === r.sleeve, got: catalog.sleeveById(state.pattern?.sleeve)?.name || '—' });
-  if (r.neck) list.push({ key: 'neck', icon: '🔻', label: catalog.neckById(r.neck)?.name || r.neck, ok: state.pattern?.neck === r.neck, got: catalog.neckById(state.pattern?.neck)?.name || '—' });
+  const colorItem = (ids) => ({ key: 'color', icon: '🎨', label: `Color: ${ids.map(colorName).join(' o ')}`, ok: ids.some(sameColor), got: currentColor(), want: ids, have: curColorId });
+  if (r.color) list.push(colorItem([r.color]));
+  if (r.colors) list.push(colorItem(r.colors));
+  if (r.size) list.push({ key: 'size', icon: '📏', label: `Talle ${r.size}`, ok: p.size === r.size, got: `talle ${p.size || '—'}`, want: r.size, have: p.size || null });
+  if (r.fit) list.push({ key: 'fit', icon: '👕', label: `Calce ${lcFirst(catalog.fitById(r.fit)?.name || r.fit)}`, ok: p.fit === r.fit, got: catalog.fitById(p.fit)?.name || '—', want: r.fit, have: p.fit || null });
+  if (r.sleeve) list.push({ key: 'sleeve', icon: '💪', label: catalog.sleeveById(r.sleeve)?.name || r.sleeve, ok: p.sleeve === r.sleeve, got: catalog.sleeveById(p.sleeve)?.name || '—', want: r.sleeve, have: p.sleeve || null });
+  if (r.neck) list.push({ key: 'neck', icon: '🔻', label: catalog.neckById(r.neck)?.name || r.neck, ok: p.neck === r.neck, got: catalog.neckById(p.neck)?.name || '—', want: r.neck, have: p.neck || null });
   if (r.technique) {
-    const tid = state.print?.technique || state.design?.technique;
-    list.push({ key: 'technique', icon: catalog.techniqueById(r.technique)?.icon || '🖨️', label: `Estampa: ${catalog.techniqueById(r.technique)?.name || r.technique}`, ok: tid === r.technique, got: tid ? catalog.techniqueById(tid)?.name : 'sin estampa' });
+    const tid = state.print?.technique || state.design?.technique || null;
+    list.push({ key: 'technique', icon: catalog.techniqueById(r.technique)?.icon || '🖨️', label: `Estampa: ${catalog.techniqueById(r.technique)?.name || r.technique}`, ok: tid === r.technique, got: tid ? catalog.techniqueById(tid)?.name || tid : 'sin estampa', want: r.technique, have: tid });
   }
   return list;
 }
 
-const COMPLAINTS = {
-  fabric: (c) => `La tela no es la que te pedí: esto es ${c.got}.`,
-  color: (c) => `¡Te la pedí de otro color! Me trajiste ${c.got}.`,
-  size: (c) => `Es ${c.got} y yo te pedí ${c.label.toLowerCase()}.`,
-  fit: (c) => `El calce no es el que hablamos: es ${c.got.toLowerCase()}.`,
-  sleeve: (c) => `Te pedí ${c.label.toLowerCase()}, no ${c.got.toLowerCase()}.`,
-  neck: (c) => `¿Y el ${c.label.toLowerCase()} que te pedí?`,
-  technique: (c) => `¿Y la ${c.label.replace('Estampa: ', '').toLowerCase()}? Esto tiene ${c.got.toLowerCase()}.`,
+// Cómo nombra el cliente cada técnica (con su artículo).
+const TECH_SAID = {
+  serigrafia: 'la serigrafía',
+  vinilo: 'el vinilo',
+  dtf: 'el DTF',
+  sublimacion: 'la sublimación',
+  bordado: 'el bordado',
+  puff: 'la tinta puff',
+  glitter: 'el glitter',
+  foil: 'el foil',
+  pintura: 'la pintura a mano',
 };
+const SLEEVE_WANT = { corta: 'de manga corta', larga: 'de manga larga', sin: 'sin mangas' };
+const SLEEVE_HAVE = { corta: 'tiene manga corta', larga: 'tiene manga larga', sin: 'no tiene mangas' };
+const NECK_WANT = { redondo: 'con cuello redondo', v: 'con escote en V' };
+const NECK_HAVE = { redondo: 'tiene cuello redondo', v: 'tiene escote en V' };
 
-// Reacción del cliente: depende de si se cumplió lo pedido y de la calidad. El cliente paga lo
-// acordado (su presupuesto): con propina si queda encantado, con descuento si queda a medias y
-// la mitad si se enoja. El costo y el valor de mercado se comparan aparte (rentabilidad).
+// Queja del cliente por el primer requisito que no se cumplió.
+export function complaintFor(c, catalog) {
+  const colorWord = (id) => lcFirst(catalog.colorById(id)?.name || id);
+  switch (c.key) {
+    case 'fabric': {
+      const want = c.want.map((id) => lcFirst(catalog.fabricById(id)?.short || id)).join(' o ');
+      const have = catalog.fabricById(c.have)?.short;
+      return have ? `Te la pedí de ${want} y me la hiciste de ${lcFirst(have)}.` : `Te la pedí de ${want}.`;
+    }
+    case 'color': {
+      const want = c.want.map(colorWord).join(' o ');
+      const have = c.have ? `color ${colorWord(c.have)}` : 'de otro color';
+      return `¡Te la pedí color ${want} y me la trajiste ${have}!`;
+    }
+    case 'size':
+      return `¡Te pedí talle ${c.want} y esta es talle ${c.have || '—'}!`;
+    case 'fit': {
+      const want = lcFirst(catalog.fitById(c.want)?.name || c.want);
+      const have = catalog.fitById(c.have)?.name;
+      return have ? `Quedamos en un calce ${want} y me la hiciste ${lcFirst(have)}.` : `Quedamos en un calce ${want}.`;
+    }
+    case 'sleeve':
+      return `Te la pedí ${SLEEVE_WANT[c.want] || lcFirst(c.label)} y ${SLEEVE_HAVE[c.have] || 'no es lo que hablamos'}.`;
+    case 'neck':
+      return `Te la pedí ${NECK_WANT[c.want] || lcFirst(c.label)} y ${NECK_HAVE[c.have] || 'no es lo que hablamos'}.`;
+    case 'technique': {
+      const want = TECH_SAID[c.want] || 'la estampa';
+      if (!c.have) return `¿Y ${want} que te pedí? ¡Me la entregaste sin estampa!`;
+      return `¿Y ${want} que te pedí? Esto es ${spoken(catalog.techniqueById(c.have)?.name || c.have)}.`;
+    }
+    default:
+      return 'Hay cosas que no respetaste.';
+  }
+}
+
+// Reacción del cliente: depende de cuántos requisitos no se cumplieron y de la calidad.
+// Cada incumplimiento pesa igual, pida el cliente 2 cosas o 4: ninguno → puede quedar
+// encantado, uno → conforme (con descuento), dos o más → enojado. El cliente paga lo
+// acordado (su presupuesto): con propina si queda encantado, con descuento si queda a medias
+// y la mitad si se enoja. El costo y el valor de mercado se comparan aparte (rentabilidad).
 export function clientVerdict(state, catalog, grade, price, cost) {
   const o = state.order;
   if (!o) return null;
@@ -146,12 +202,14 @@ export function clientVerdict(state, catalog, grade, price, cost) {
   const met = checks.filter((c) => c.ok).length;
   const ratio = checks.length ? met / checks.length : 1;
   const failed = checks.filter((c) => !c.ok);
-  const level = ratio === 1 && grade >= 70 ? 2 : ratio >= 0.6 && grade >= 50 ? 1 : 0;
+  const nFail = failed.length;
+  const level = nFail === 0 ? (grade >= 70 ? 2 : grade >= 50 ? 1 : 0) : nFail === 1 && grade >= 50 ? 1 : 0;
   const lines = [];
   if (level === 2) lines.push(grade >= 85 ? '¡Es tal cual la imaginaba! Te voy a recomendar con todo el mundo.' : '¡Me encanta! Es justo lo que te pedí.');
-  else if (level === 1) lines.push(failed.length ? 'Está bien, me la llevo… aunque no es exactamente lo que te pedí.' : 'Cumple con lo que te pedí, pero le faltan detalles de terminación.');
-  else lines.push(failed.length ? '¡Esto no es lo que te pedí!' : 'Lo que pedí está, pero la calidad deja mucho que desear.');
-  if (failed.length) lines.push(COMPLAINTS[failed[0].key]?.(failed[0]) || 'Hay cosas que no respetaste.');
+  else if (level === 1) lines.push(nFail ? 'Está bien, me la llevo… aunque no es exactamente lo que te pedí.' : 'Cumple con lo que te pedí, pero le faltan detalles de terminación.');
+  else lines.push(nFail ? '¡Esto no es lo que te pedí!' : 'Lo que pedí está, pero la calidad deja mucho que desear.');
+  if (nFail) lines.push(complaintFor(failed[0], catalog));
+  if (nFail > 1) lines.push(nFail === 2 ? 'Y eso no es lo único.' : `Y encima hay ${nFail - 1} cosas más que no respetaste.`);
   const budget = o.budget || 0;
   const tip = level === 2 && grade >= 85 ? Math.round((budget * 0.1) / 100) * 100 : 0;
   const pays = level === 2 ? budget + tip : level === 1 ? Math.round((budget * 0.9) / 100) * 100 : Math.round((budget * 0.5) / 100) * 100;
@@ -159,12 +217,16 @@ export function clientVerdict(state, catalog, grade, price, cost) {
   else if (level === 1) lines.push('¿Me hacés un descuentito?');
   const how = ['Paga la mitad de lo acordado y se va masticando bronca.', 'Pide un descuento: paga el 90% de lo acordado.', tip ? `Paga lo acordado y te deja ${Math.round((tip / Math.max(1, budget)) * 100)}% de propina.` : 'Paga lo acordado.'][level];
   const profit = pays - (cost || 0);
+  // Consejos sobre lo que el jugador sí controla: cumplir el pedido, la calidad y qué materiales usa.
   const advice = [];
-  if (cost > budget) advice.push('Gastaste más de lo que te pagan: para este presupuesto elegí materiales o técnicas más económicos.');
-  else if (price > budget * 1.1) advice.push('Tu remera vale más de lo que pagó el cliente: con esta calidad, la próxima cotizá más alto.');
+  if (cost > budget) advice.push('Gastaste más de lo que el cliente estaba dispuesto a pagar: para este presupuesto elegí materiales o técnicas más económicos.');
+  else if (nFail) advice.push('En un pedido lo que más pesa es respetar lo que pidió el cliente: en cada paso, la opción que pidió tiene el sello «Pedido».');
+  else if (level < 2) advice.push('Cumpliste con lo pedido, pero la calidad te bajó el cobro: mirá las notas de los pasos con menos puntaje.');
+  else if (grade >= 80 && price > budget * 1.1) advice.push('Con esta calidad tu remera vale más de lo que pagó el cliente: animate a tomar pedidos con más presupuesto («Otro cliente» en la bienvenida).');
+  if (profit < 0 && cost <= budget) advice.push('Con lo que cobraste no llegaste a cubrir el costo: esta vez perdiste plata.');
   const mood = ['enojado', 'conforme', 'feliz'][level];
   const face = ['😠', '🙂', '😍'][level];
-  return { mood, face, level, lines, checks, met, ratio, budget, price, cost, pays, tip, how, profit, advice };
+  return { mood, face, level, lines, checks, met, ratio, failed: nFail, budget, price, cost, pays, tip, how, profit, advice };
 }
 
 // ---------- Prueba de lavado ----------
@@ -172,14 +234,21 @@ export function computeWash(state, catalog, pattern) {
   const fabric = catalog.fabricById(state.fabric?.id) || catalog.FABRICS[0];
   const pre = state.prewash || {};
   const prewashed = !!pre.done && !pre.skipped;
+  const wt = fabric.washTemp;
   let shrink = fabric.shrink;
   let shrinkNote;
+  let fiberHarm = false;
   if (prewashed) {
-    const cold = pre.temp != null && pre.temp < fabric.washTemp - 5;
-    shrink = fabric.shrink * (cold ? 0.4 : 0.12);
-    shrinkNote = cold
-      ? 'El prelavado fue con agua más fría que la del uso: le quedó algo por encoger.'
-      : '¡Bien ahí el prelavado! La tela ya había encogido antes de cortar.';
+    // Lo que quedó por encoger: lo informa el paso de prelavado (0 = nada, 1 = todo);
+    // si no está (estado viejo), se deduce de la temperatura.
+    const t = pre.temp ?? wt;
+    const residual = typeof pre.residualShrink === 'number' ? clamp(pre.residualShrink) : t === 0 ? 0.5 : t < wt - 5 ? 0.25 : 0;
+    shrink = fabric.shrink * (0.1 + 0.9 * residual);
+    fiberHarm = t - wt >= 20;
+    if (residual > 0.01) shrinkNote = `El prelavado fue con agua más fría que la del uso (${wt} °C): a la tela le quedó algo por encoger.`;
+    else if (fiberHarm) shrinkNote = `La tela ya había encogido en el prelavado, pero a ${t} °C fue demasiado: la fibra quedó resentida y la remera se ve más gastada.`;
+    else if (t > wt) shrinkNote = '¡Bien ahí el prelavado! Un poco caliente, pero la tela ya había encogido antes de cortar.';
+    else shrinkNote = '¡Bien ahí el prelavado! La tela ya había encogido antes de cortar.';
   } else {
     shrinkNote = 'Sin prelavado, la tela encogió recién ahora, con la remera ya cosida.';
   }
@@ -193,8 +262,13 @@ export function computeWash(state, catalog, pattern) {
   const sizes = catalog.SIZES;
   const si = sizes.findIndex((s) => s.id === state.pattern?.size);
   let sizeDown = null;
-  if (lengthLoss >= 2.6 && si > 0) sizeDown = sizes[si - 1].id;
-  else if (lengthLoss >= 2.6 && si === 0) sizeDown = 'XXS';
+  let sizeNote = '';
+  if (lengthLoss >= 2.6) {
+    if (si > 0) {
+      sizeDown = sizes[si - 1].id;
+      sizeNote = `Ahora calza como talle ${sizeDown}.`;
+    } else if (si === 0) sizeNote = `Ahora queda más chica que un talle ${sizes[0].id}.`;
+  }
 
   // Estampa: durabilidad de la técnica × calidad del estampado.
   const techId = state.print?.technique || state.design?.technique || null;
@@ -212,9 +286,9 @@ export function computeWash(state, catalog, pattern) {
     if (tech.id === 'sublimacion') fade = clamp(fade + (1 - (fabric.sublimation ?? 1)) * 0.45, 0, 0.85);
     if (tech.id === 'bordado') printNote = fade < 0.1 ? 'El bordado quedó intacto: el hilo no se despinta.' : 'El bordado aguantó, aunque el hilo perdió un poco de brillo.';
     else if (tech.id === 'sublimacion') printNote = fade < 0.12 ? 'La sublimación tiñe la fibra: ni grietas ni despegues.' : 'La sublimación se lavó bastante: en esta tela la tinta no se fijó bien.';
-    else if (crack > 0.3) printNote = `La estampa de ${tech.name.toLowerCase()} se agrietó y perdió color.`;
-    else if (crack > 0.12 || fade > 0.2) printNote = `La estampa de ${tech.name.toLowerCase()} se gastó un poco: algunas grietitas finas.`;
-    else printNote = `La estampa de ${tech.name.toLowerCase()} quedó como nueva.`;
+    else if (crack > 0.3) printNote = `La estampa de ${spoken(tech.name)} se agrietó y perdió color.`;
+    else if (crack > 0.12 || fade > 0.2) printNote = `La estampa de ${spoken(tech.name)} se gastó un poco: algunas grietitas finas.`;
+    else printNote = `La estampa de ${spoken(tech.name)} quedó como nueva.`;
   }
 
   // Costuras: hilo apto + puntadas elásticas en tejido de punto.
@@ -227,19 +301,24 @@ export function computeWash(state, catalog, pattern) {
   seamRisk = clamp(seamRisk);
   let seamNote;
   if (seamRisk < 0.15) seamNote = 'Las costuras aguantaron firmes, sin un solo punto corrido.';
-  else if (!threadOk) seamNote = `El hilo de ${thread?.name.toLowerCase()} no acompaña esta tela: se cortaron algunas puntadas.`;
+  else if (!threadOk) seamNote = `El hilo de ${lcFirst(thread?.name)} no acompaña esta tela: se cortaron algunas puntadas.`;
   else if (rigid) seamNote = 'Las costuras con puntada recta se cortaron al estirar: en tejido de punto va overlock o zigzag.';
   else seamNote = 'Alguna costura floja se abrió un poquito.';
 
   const shrinkPenalty = clamp(shrink / 0.06) * 38;
-  const score = Math.round(clamp(100 - shrinkPenalty - fade * 45 - crack * 40 - seamRisk * 25, 0, 100));
+  const score = Math.round(clamp(100 - shrinkPenalty - fade * 45 - crack * 40 - seamRisk * 25 - (fiberHarm ? 8 : 0), 0, 100));
   const verdict = score >= 85 ? '¡Aprobó con honores!' : score >= 68 ? 'Aprobada' : score >= 50 ? 'Pasable' : 'Reprobada';
   const tips = [];
   if (!prewashed) tips.push('Prelavá siempre la tela a la temperatura de uso <b>antes</b> de cortar: así encoge antes y no después.');
   if (tech && crack > 0.12) tips.push('Lavá las remeras estampadas del revés y con agua fría: la estampa dura mucho más.');
   if (tech && tech.id === 'foil') tips.push('El foil es delicado: nada de secarropas ni plancha directa sobre la estampa.');
   if (tech && tech.id === 'sublimacion' && (fabric.sublimation ?? 1) < 0.6) tips.push('La sublimación necesita poliéster: en algodón se va con los lavados.');
-  if (!threadOk) tips.push('Para tejido de punto usá hilo de poliéster o nylon, que estiran con la tela.');
+  if (!threadOk) {
+    const good = catalog.THREADS.filter((t) => t.goodFor.includes(fabric.id)).map((t) => lcFirst(t.name));
+    const list = good.length > 1 ? `${good.slice(0, -1).join(', ')} o ${good[good.length - 1]}` : good[0];
+    if (list) tips.push(fabric.knit ? `En tejido de punto como el ${lcFirst(fabric.short)} va un hilo que estire con la tela: ${list}.` : `Para ${lcFirst(fabric.short)} (tejido plano) usá un hilo firme: ${list}.`);
+  }
+  if (fiberHarm) tips.push(`Prelavá a la temperatura de uso (${wt} °C): más caliente no encoge "mejor", daña la fibra.`);
   if (!tips.length) tips.push('Para que dure: lavar con agua tibia, del revés y secar a la sombra.');
   return {
     done: true,
@@ -254,7 +333,9 @@ export function computeWash(state, catalog, pattern) {
     lengthLoss,
     chestLoss,
     sizeDown,
+    sizeNote,
     shrinkNote,
+    fiberHarm,
     technique: tech?.id || null,
     techniqueName: tech?.name || null,
     fade,

@@ -60,28 +60,42 @@ export function formatDate(ts) {
 }
 
 // Modal con la ficha de una remera de la colección. Devuelve la promesa del modal.
+// "Quitar" pide confirmación (no se puede deshacer).
 export function showCollectionItem(ui, h, item, { onRemove } = {}) {
   const rows = [
-    ['Marca', item.brand || '—'],
-    ['Nota', `${Math.round(item.score ?? 0)}/100`],
+    ['Nota', `${Math.round(item.score ?? 0)}/100${item.tier ? ' · ' + item.tier : ''}`],
     ['Tela', [item.colorHex ? h('span', { class: 'col-dot', style: { background: item.colorHex } }) : null, `${item.fabric || '—'}${item.colorName ? ' · ' + item.colorName : ''}`]],
     ['Estampa', item.technique || 'Sin estampa'],
     ['Molde', item.pattern || '—'],
   ];
   if (item.client) rows.push(['Pedido de', `${item.clientAvatar || ''} ${item.client}`]);
   if (item.wash) rows.push(['Lavado', item.wash]);
-  rows.push(['Fecha', formatDate(item.date)]);
+  const date = formatDate(item.date);
+  const brand = item.brand || 'Mi Taller';
   const body = h(
     'div',
     { class: 'col-modal' },
-    h('figure', { class: 'col-modal-photo' }, item.thumb ? h('img', { src: item.thumb, alt: 'Remera terminada' }) : h('div', { class: 'col-modal-empty' }, '👕'), h('figcaption', {}, item.tier || '')),
+    h('figure', { class: 'col-modal-photo' }, item.thumb ? h('img', { src: item.thumb, alt: 'Remera terminada' }) : h('div', { class: 'col-modal-empty' }, '👕'), h('figcaption', {}, date ? `Terminada el ${date}` : 'Remera terminada')),
     ui.propTable(rows),
   );
   const actions = [];
   if (onRemove) actions.push({ id: 'remove', label: 'Quitar de la colección', kind: 'ghost' });
   actions.push({ id: 'ok', label: 'Cerrar', kind: 'primary' });
-  return ui.modal({ title: item.tier ? `${item.tier}` : 'Remera de la colección', body, actions }).then((id) => {
-    if (id === 'remove' && onRemove) onRemove(item);
-    return id;
+  return ui.modal({ title: `👕 ${brand}`, body, actions }).then(async (id) => {
+    if (id !== 'remove' || !onRemove) return id;
+    const sure = await ui.modal({
+      title: '¿Quitar esta remera?',
+      body: h('p', { class: 'col-confirm' }, `Se borra de tu colección la remera de ${brand}${date ? ` del ${date}` : ''} (nota ${Math.round(item.score ?? 0)}). No se puede deshacer.`),
+      actions: [
+        { id: 'cancel', label: 'Cancelar', kind: 'secondary' },
+        { id: 'yes', label: 'Sí, quitarla', kind: 'danger' },
+      ],
+    });
+    if (sure === 'yes') {
+      onRemove(item);
+      ui.toast('Remera quitada de tu colección.', 'info', 2200);
+      return 'remove';
+    }
+    return 'cancel';
   });
 }

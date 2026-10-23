@@ -341,6 +341,13 @@ export function createSewingMachine({ needle, topY, ry = 0 }) {
     needlePoint,
     bedTopY: topY + plateTop,
     feedDir,
+    // fase y velocidad internas de la aguja (para sincronizar puntadas)
+    get phase() {
+      return phase;
+    },
+    get speed() {
+      return speed;
+    },
     setSpeed(v) {
       speedTarget = clamp(v, 0, 1);
     },

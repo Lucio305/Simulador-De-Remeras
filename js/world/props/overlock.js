@@ -125,6 +125,12 @@ export function createOverlock({ position, topY, ry = 0 }) {
   let phase = 0;
   return {
     group,
+    get phase() {
+      return phase;
+    },
+    get speed() {
+      return speed;
+    },
     setSpeed(v) {
       target = clamp(v, 0, 1);
     },
@@ -136,7 +142,7 @@ export function createOverlock({ position, topY, ry = 0 }) {
     update(dt) {
       speed = damp(speed, target, 8, dt);
       phase += speed * Math.PI * 2 * 12 * dt;
-      needles.position.y = (0.5 + 0.5 * Math.cos(phase)) * 0.01 - 0.01;
+      needles.position.y = (0.5 + 0.5 * Math.cos(phase)) * 0.012 - 0.018;
       wheel.rotation.x = -phase;
     },
   };

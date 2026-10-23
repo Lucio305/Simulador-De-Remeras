@@ -169,8 +169,43 @@ function maskingTape(cx, cy, deg) {
   );
 }
 
+// Cruces de una horizontal (y, metros) con un polígono: [minX, maxX] o null.
+function spanAtY(poly, y) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    if ((a.y - y) * (b.y - y) > 0 || a.y === b.y) continue;
+    const x = a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    lo = Math.min(lo, x);
+    hi = Math.max(hi, x);
+  }
+  return hi > lo ? [lo, hi] : null;
+}
+
+// Línea de pecho trazada en lápiz por el moldista: cota con topes y la medida escrita.
+// Devuelve { g, y } (y en cm del SVG) o null.
+function chestLine(piece, ox, oy, chestY, chestCm) {
+  let top = -Infinity;
+  for (const p of piece.seamLine) top = Math.max(top, p.y);
+  const y = chestY + top; // y de prenda → y de la pieza (el HPS es lo más alto de la costura)
+  const span = spanAtY(piece.seamLine, y);
+  if (!span) return null;
+  const sy = f1(oy - y * CM);
+  const x0 = f1(ox + span[0] * CM + 0.5);
+  const x1 = f1(ox + span[1] * CM - 0.5);
+  const g = s('g', { class: 'mld-pencil' });
+  g.appendChild(s('path', { d: `M${x0} ${sy}H${x1}M${x0} ${f1(sy - 0.8)}v1.6M${x1} ${f1(sy - 0.8)}v1.6`, fill: 'none', stroke: 'rgba(70,64,58,0.55)', 'stroke-width': 0.13, 'stroke-linecap': 'round' }));
+  const tx = f1(ox + span[1] * CM * 0.52);
+  g.appendChild(s('text', { x: tx, y: f1(sy - 0.75), class: 'mld-pencil-txt', 'font-size': 1.75, 'text-anchor': 'middle' }, `pecho ${cmTxt(chestCm)}`));
+  return { g, y: sy };
+}
+
+let clipSeq = 0;
+
 // Una pieza de molde (coords de la pieza en metros, centrada en su bbox) ubicada en (ox, oy) cm.
-function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index }) {
+function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index, chestY = null, chestCm = null }) {
   const info = pieceInfo(piece);
   const w = piece.width * CM;
   const hgt = piece.height * CM;
@@ -183,6 +218,21 @@ function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index }) {
   // papel: color base + textura de papel madera (manchas, fibras, motitas)
   body.appendChild(s('path', { d: cut, fill: piece.color || '#d9bb8c', class: 'mld-paper' }));
   body.appendChild(s('path', { d: cut, fill: 'url(#mld-kraft)', class: 'mld-fibers' }));
+  // marca de doblez del papel (el molde estuvo guardado doblado): pliegue claro + sombra, recortado a la pieza
+  if (piece.id === 'espalda' || (piece.id.startsWith('manga') && hgt > 40)) {
+    const id = `mld-clip-${++clipSeq}`;
+    body.appendChild(s('clipPath', { id }, s('path', { d: cut })));
+    const r = rng(Math.round(w * 31 + hgt * 17 + index));
+    const fy = oy + hgt * (0.12 + r() * 0.16);
+    const tilt = (r() - 0.5) * 5;
+    const d = `M${f1(ox - w / 2 - 2)} ${f1(fy - tilt)}Q${f1(ox)} ${f1(fy + (r() - 0.5) * 1.6)} ${f1(ox + w / 2 + 2)} ${f1(fy + tilt)}`;
+    const crease = s('g', { 'clip-path': `url(#${id})`, class: 'mld-crease' });
+    crease.appendChild(s('path', { d, fill: 'none', stroke: 'rgba(92,58,24,0.075)', 'stroke-width': 2.6, transform: 'translate(0 1.1)' }));
+    crease.appendChild(s('path', { d, fill: 'none', stroke: 'rgba(255,246,226,0.16)', 'stroke-width': 1.6, transform: 'translate(0 -0.9)' }));
+    crease.appendChild(s('path', { d, fill: 'none', stroke: 'rgba(255,246,226,0.42)', 'stroke-width': 0.3, transform: 'translate(0 -0.12)' }));
+    crease.appendChild(s('path', { d, fill: 'none', stroke: 'rgba(80,50,20,0.2)', 'stroke-width': 0.12, transform: 'translate(0 0.2)' }));
+    body.appendChild(crease);
+  }
   // línea de costura (punteada) y línea de corte (marcador)
   body.appendChild(s('path', { d: pathD(piece.seamLine, ox, oy), fill: 'none', stroke: '#6b4521', 'stroke-width': 0.2, 'stroke-dasharray': '1.1 0.7', class: 'mld-seam' }));
   body.appendChild(s('path', { d: cut, fill: 'none', stroke: '#3f2611', 'stroke-width': 0.34, 'stroke-linejoin': 'round', class: 'mld-cut' }));
@@ -218,6 +268,7 @@ function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index }) {
     return [[0, 0], [rr, 0], [-rr, 0], [0, rr], [0, -rr]].every(([dx, dy]) => pointInPolygon(px + dx, py + dy, piece.outline));
   };
   // línea de centro (frente / espalda): de la boca del escote al ruedo, en raya y punto
+  let chest = null;
   if (isBody) {
     let top = -Infinity;
     let bot = Infinity;
@@ -228,6 +279,10 @@ function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index }) {
     }
     if (top > bot) {
       body.appendChild(s('line', { x1: ox, y1: oy - top * CM + 1.2, x2: ox, y2: oy - bot * CM - 1.2, stroke: 'rgba(74,47,20,0.55)', 'stroke-width': 0.16, 'stroke-dasharray': '3 0.8 0.5 0.8' }));
+    }
+    if (chestY !== null && chestCm) {
+      chest = chestLine(piece, ox, oy, chestY, chestCm);
+      if (chest) body.appendChild(chest.g);
     }
   }
   // flecha de hilo (doble punta) paralela al eje y de la pieza
@@ -254,7 +309,9 @@ function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index }) {
     const nameSize = big ? 4.4 : 3.6;
     const subSize = big ? 2.9 : 2.5;
     const cx = longSleeve ? ox : isSleeve ? ox + w * 0.06 : ox + w * 0.07;
-    const cy = longSleeve ? oy - hgt * 0.24 : isSleeve ? oy - hgt * 0.02 : oy - hgt * 0.04;
+    let cy = longSleeve ? oy - hgt * 0.24 : isSleeve ? oy - hgt * 0.02 : oy - hgt * 0.04;
+    // el nombre va siempre debajo de la línea de pecho (en oversize la sisa baja y la línea también)
+    if (chest) cy = Math.max(cy, chest.y + nameSize + 2.2);
     body.appendChild(s('text', { x: cx, y: cy, class: 'mld-hand mld-name', 'font-size': nameSize, 'text-anchor': 'middle' }, info.name));
     body.appendChild(s('text', { x: cx, y: cy + subSize * 1.35, class: 'mld-hand mld-sub', 'font-size': subSize, 'text-anchor': 'middle' }, `Talle ${sizeLabel} · ${fitLabel}`));
     body.appendChild(s('text', { x: cx, y: cy + subSize * 2.6, class: 'mld-hand mld-sub', 'font-size': subSize, 'text-anchor': 'middle' }, info.cut));
@@ -265,10 +322,18 @@ function pieceGroup(piece, ox, oy, { sizeLabel, fitLabel, index }) {
       body.appendChild(s('circle', { cx: sx, cy: sy, r: 2.6, fill: 'none', stroke: '#9b3b24', 'stroke-width': 0.28 }));
       body.appendChild(s('text', { x: sx, y: sy + 1.05, class: 'mld-hand mld-size', 'font-size': sizeLabel.length > 2 ? 2.1 : 2.9, 'text-anchor': 'middle', fill: '#9b3b24' }, sizeLabel));
     }
-    // ojal para colgar el molde en el gancho
-    const px = ox + (longSleeve ? -0.24 : isSleeve ? 0.26 : 0.18) * w;
-    const py = oy - hgt * (longSleeve ? 0.3 : isSleeve ? 0.14 : 0.36);
-    if (inside(px, py, 2.2)) {
+    // ojal para colgar el molde en el gancho: el primer lugar libre (adentro y lejos de los textos)
+    const longest = Math.max(info.name.length * nameSize * 0.72, `Talle ${sizeLabel} · ${fitLabel}`.length * subSize * 0.56, info.cut.length * subSize * 0.56);
+    const tb = { x0: cx - longest / 2 - 1.6, x1: cx + longest / 2 + 1.6, y0: cy - nameSize - 1.6, y1: cy + subSize * 2.6 + 1.6 };
+    const free = (x, y) => inside(x, y, 2.2) && !(x > tb.x0 && x < tb.x1 && y > tb.y0 && y < tb.y1);
+    const spots = longSleeve
+      ? [[-0.24, -0.3], [0.2, -0.3], [0, -0.38]]
+      : isSleeve
+        ? [[0.26, -0.14], [-0.12, -0.3], [0.12, -0.3], [0.3, 0.1]]
+        : [[0.18, -0.36], [0.24, -0.3]];
+    const spot = spots.map(([fx, fy]) => [ox + fx * w, oy + fy * hgt]).find(([x, y]) => free(x, y));
+    if (spot) {
+      const [px, py] = spot;
       body.appendChild(s('circle', { cx: px, cy: py, r: 1.15, fill: '#e9dcc3', stroke: '#b9a582', 'stroke-width': 0.35 }));
       body.appendChild(s('circle', { cx: px, cy: py, r: 0.62, fill: '#356f5b' }));
     }
@@ -344,8 +409,11 @@ export function renderSheet(pattern, { sizeLabel = 'M', fitLabel = 'Clásica', a
   svg.appendChild(defs());
   svg.appendChild(cuttingMat(W, H));
   const groups = new Map();
+  const c = pattern.construction;
+  const chestY = c && c.UA ? c.UA.y - 0.025 : null;
+  const chestCm = pattern.measurements?.chest || null;
   placed.forEach((q, i) => {
-    const g = pieceGroup(q.piece, q.cx, q.cy, { sizeLabel, fitLabel, index: i });
+    const g = pieceGroup(q.piece, q.cx, q.cy, { sizeLabel, fitLabel, index: i, chestY, chestCm });
     groups.set(q.piece.id, g);
     // apoyado a mano: cada molde queda apenas girado
     const deg = (((i * 37) % 7) - 3) * 0.22;
@@ -371,18 +439,25 @@ export function stampSheet(svg, text) {
   return g;
 }
 
-// Icono chico de una silueta (outline en coords de prenda) para las opciones del panel.
-export function silhouetteIcon(outline, { crop = null, size = 46, stroke = 'currentColor' } = {}) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const p of outline) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
+// Caja (coords de prenda) que contiene a todas las siluetas: sirve como `frame` común para que
+// varios íconos queden a la misma escala (así se ve que una es más ancha o más larga que otra).
+export function outlinesBox(outlines) {
+  const b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  for (const o of outlines) {
+    for (const p of o) {
+      b.minX = Math.min(b.minX, p.x);
+      b.maxX = Math.max(b.maxX, p.x);
+      b.minY = Math.min(b.minY, p.y);
+      b.maxY = Math.max(b.maxY, p.y);
+    }
   }
+  return b;
+}
+
+// Icono chico de una silueta (outline en coords de prenda) para las opciones del panel.
+// frame: caja fija (outlinesBox) en lugar de la propia de la silueta.
+export function silhouetteIcon(outline, { crop = null, frame = null, size = 46, stroke = 'currentColor' } = {}) {
+  let { minX, maxX, minY, maxY } = frame || outlinesBox([outline]);
   if (crop) {
     minX = crop.minX ?? minX;
     maxX = crop.maxX ?? maxX;

@@ -278,6 +278,28 @@
 .hilo-retazo-stage {
   position: relative;
 }
+/* "tirá →" a la derecha de la pinza roja (DOM: el canvas queda quieto mientras espera) */
+.hilo-retazo-idle {
+  position: absolute;
+  transform: translateY(-50%);
+  color: rgba(255, 248, 239, 0.92);
+  font: 800 12px/1 var(--font, system-ui, sans-serif);
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  animation: hiloIdleNudge 0.75s ease-in-out infinite alternate;
+}
+.hilo-retazo-idle.hide {
+  display: none;
+}
+@keyframes hiloIdleNudge {
+  from {
+    transform: translate(-2px, -50%);
+  }
+  to {
+    transform: translate(5px, -50%);
+  }
+}
 .hilo-retazo-canvas {
   display: block;
   width: 100%;
@@ -328,12 +350,13 @@
 }
 .hilo-retazo-verdict.show {
   display: block;
-  animation: hiloVerdictIn 0.3s ease-out;
+  animation: hiloVerdictIn 0.35s ease-out;
 }
+/* sin opacidad 0 en el arranque: si la animación tarda en correr, el texto igual se ve */
 @keyframes hiloVerdictIn {
   from {
-    opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-5px);
+    background-color: #fff1cf;
   }
 }
 
@@ -379,14 +402,166 @@
   font-size: 13.5px;
 }
 
-/* retazo fijo arriba del panel mientras se eligen las opciones (escritorio) */
+/* prueba en un retazo: retazo + resumen de una línea */
 .hilo-test {
+  margin: 0 0 8px;
+}
+/* en pantallas altas de escritorio queda fija arriba mientras se eligen las opciones;
+   el detalle del veredicto (abajo) se desplaza con el resto */
+@media (min-width: 821px) and (min-height: 860px) {
+  .hilo-test {
+    position: sticky;
+    top: -12px;
+    z-index: 3;
+    margin: 0 -20px 8px;
+    padding: 8px 20px 7px;
+    background: var(--card-solid);
+    box-shadow: 0 10px 12px -12px rgba(43, 36, 32, 0.35);
+  }
+  .panel.hilo-step .panel-body {
+    scroll-padding-top: var(--hilo-sticky-h, 0px);
+  }
+}
+
+/* resumen: fichas ✓ / ! / ✗ por área. Con el retazo fijo (pantallas altas) resume el
+   veredicto aunque el detalle haya quedado arriba; si no, el detalle está justo debajo y
+   el resumen solo muestra las indicaciones (probar, tirando, cambiaste algo). */
+.hilo-sum.is-result {
+  display: none;
+}
+@media (min-width: 821px) and (min-height: 860px) {
+  .hilo-sum.is-result {
+    display: flex;
+  }
+}
+.hilo-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  margin-top: 7px;
+  font-size: 12px;
+}
+.hilo-sum-text {
+  color: var(--ink-3);
+  line-height: 1.3;
+}
+.hilo-sum-text.warn {
+  color: var(--ink);
+}
+.hilo-sum.is-stale .hilo-sum-text b,
+.hilo-sum.is-idle .hilo-sum-text b {
+  color: var(--accent);
+}
+.hilo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 3px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  background: var(--good-soft);
+  color: var(--good);
+  cursor: default;
+}
+.hilo-chip i {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 900;
+  color: #fff;
+  background: var(--good);
+}
+.hilo-chip em {
+  font-style: normal;
+  font-weight: 600;
+}
+.hilo-chip.warn {
+  background: var(--warn-soft);
+  color: #8a5a0b;
+}
+.hilo-chip.warn i {
+  background: var(--warn);
+}
+.hilo-chip.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.hilo-chip.bad i {
+  background: var(--bad);
+}
+
+/* detalle del veredicto: tarjeta debajo de la prueba */
+.hilo-verdict-box.show {
+  margin: 0 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.hilo-verdict-box:not(.show) + .ui-section {
+  margin-top: 6px;
+}
+
+/* barrita con el resumen cuando el retazo quedó fuera de la vista (pantallas bajas / celular) */
+.hilo-mini {
   position: sticky;
   top: -12px;
-  z-index: 3;
-  margin: 0 -20px 14px;
-  padding: 8px 20px 10px;
-  background: linear-gradient(180deg, var(--card-solid) 88%, rgba(255, 252, 247, 0));
+  z-index: 6;
+  height: 0;
+  margin: 0 -20px;
+}
+.hilo-mini-inner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px 6px 20px;
+  background: var(--card-solid);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 14px -8px rgba(43, 36, 32, 0.35);
+  visibility: hidden;
+}
+/* entra deslizando un poco (sin arrancar invisible: si la animación se demora, igual se ve) */
+.hilo-mini.show .hilo-mini-inner {
+  visibility: visible;
+  animation: hiloMiniIn 0.22s ease-out;
+}
+@keyframes hiloMiniIn {
+  from {
+    transform: translateY(-8px);
+  }
+}
+.hilo-mini-ico {
+  font-size: 15px;
+}
+.hilo-mini-sum {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.hilo-mini-btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 12.5px;
 }
 .hilo-test-head {
   display: flex;
@@ -640,12 +815,13 @@
   .tela-card-name {
     font-size: 13px;
   }
-  /* en la hoja inferior del celular no hay lugar para dejar el retazo fijo */
-  .hilo-test {
-    position: static;
-    margin: 0 0 12px;
-    padding: 0;
-    background: none;
+  .hilo-mini {
+    top: -10px;
+    margin: 0 -16px;
+  }
+  .hilo-mini-inner {
+    padding-left: 16px;
+    padding-right: 10px;
   }
 }
 

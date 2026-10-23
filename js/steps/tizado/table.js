@@ -346,10 +346,11 @@ export function createTableScene({ fabric, color, heather, sizeLabel }) {
   grain.repeat.set(1 / 0.06, 1);
   const chalkMat = new THREE.MeshStandardMaterial({ color: chalkHex, alphaMap: grain, transparent: true, roughness: 1, metalness: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const chalkLines = [];
-  // pts en coords de tela {x, z}; devuelve un trazo con progress(0..1)
-  const addChalkLine = (pts, { width = 0.0055 } = {}) => {
+  // pts en coords de tela {x, z} (contorno cerrado); devuelve un trazo con progress(0..1).
+  // offset > 0 corre la línea hacia afuera del contorno (la tiza se apoya contra el borde del papel).
+  const addChalkLine = (pts, { width = 0.0055, offset = 0 } = {}) => {
     const pp = pts.map((p) => ({ x: p.x, y: -p.z })); // a "coords de pieza" para ribbonGeometry (y → −z)
-    const g = ribbonGeometry(pp, -width / 2, width / 2, { y: 0 });
+    const g = ribbonGeometry(pp, offset - width / 2, offset + width / 2, { y: 0 });
     const m = new THREE.Mesh(g, chalkMat);
     m.position.y = topY + 0.0006;
     m.renderOrder = 2;
@@ -390,7 +391,7 @@ export function createTableScene({ fabric, color, heather, sizeLabel }) {
   const dVel = new Float32Array(N * 3);
   const dLife = new Float32Array(N);
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3));
-  const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: chalkHex, size: 0.006, transparent: true, opacity: 0.9, depthWrite: false }));
+  const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: chalkHex, size: 0.009, transparent: true, opacity: 0.9, depthWrite: false }));
   dust.frustumCulled = false;
   dust.renderOrder = 5;
   group.add(dust);
@@ -422,6 +423,39 @@ export function createTableScene({ fabric, color, heather, sizeLabel }) {
     dustGeo.attributes.position.needsUpdate = true;
   };
 
+  // ---- sombra de contacto de la tiza (para que se lea como un objeto apoyado en la tela) ----
+  const blobCv = document.createElement('canvas');
+  blobCv.width = blobCv.height = 64;
+  {
+    const c = blobCv.getContext('2d');
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, 64, 64);
+  }
+  const blobMat = new THREE.MeshBasicMaterial({ map: canvasTex(blobCv), color: '#1d140c', transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), blobMat);
+  blob.renderOrder = 3;
+  blob.visible = false;
+  blob.raycast = () => {};
+  group.add(blob);
+  // x, z en coords de tela; height = altura de la punta sobre la tela (m); size = tamaño de la tiza (m)
+  const setChalkShadow = (x, z, height = 0, size = 0.1) => {
+    if (x == null) {
+      blob.visible = false;
+      return;
+    }
+    const lift = Math.min(1, Math.max(0, height) / 0.12);
+    blob.visible = true;
+    const s = size * (0.9 + lift * 0.9);
+    blob.scale.set(s * 1.25, 1, s);
+    // el sol viene de arriba a la izquierda y de adelante: la sombra cae hacia la derecha y al fondo
+    blob.position.set(x + size * (0.18 + lift * 0.5), topY + 0.0009, z - size * (0.12 + lift * 0.35));
+    blobMat.opacity = 0.42 * (1 - lift * 0.7);
+  };
+
   // coords de tela → mundo (sobre la cara de la tela)
   const toWorld = (x, z, dy = 0) => new THREE.Vector3(o.x0 + x, group.position.y + topY + dy, o.z0 + z);
 
@@ -443,6 +477,7 @@ export function createTableScene({ fabric, color, heather, sizeLabel }) {
     chalkLines,
     chalkHex,
     puff,
+    setChalkShadow,
     tick(dt, t) {
       tickDust(dt);
       if (overlay.visible) ovMat.opacity = 0.6 + 0.3 * Math.sin(t * 7);

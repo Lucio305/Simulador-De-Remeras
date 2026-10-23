@@ -29,9 +29,23 @@
   background: var(--warn);
 }
 
+.prela-mark.ico {
+  background: none;
+  font-size: 14px;
+  color: inherit;
+}
+
 .result-notes li:has(> .prela-mark:first-child) {
   list-style: none;
   margin-left: -18px;
+  padding-left: 21px;
+  text-indent: -21px;
+}
+
+/* en el informe final las notas del paso también van alineadas por su marca */
+.fin-step-notes li:has(> .prela-mark:first-child) {
+  list-style: none;
+  margin-left: -16px;
   padding-left: 21px;
   text-indent: -21px;
 }
@@ -121,7 +135,8 @@
 .prela-dial {
   width: min(250px, 100%);
   height: auto;
-  touch-action: none;
+  /* deslizar el dedo sobre la perilla sigue desplazando el panel; solo la perilla en sí se arrastra */
+  touch-action: pan-y;
   outline: none;
   overflow: visible;
 }
@@ -152,6 +167,7 @@
 
 .prela-dial-knob {
   cursor: grab;
+  touch-action: none;
 }
 
 .prela-dial-knob:active {
@@ -236,6 +252,19 @@
 .prela-rule ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.prela-rule li {
+  margin: 2px 0;
+}
+
+/* la tela de este corte, resaltada en la regla */
+.prela-you {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: rgba(226, 178, 58, 0.35);
+  color: inherit;
+  font-weight: 800;
 }
 
 @keyframes prela-in {
@@ -373,6 +402,28 @@
 /* HUD del lavarropas */
 .prela-hud {
   min-width: 210px;
+}
+
+/* mientras seca tendida, en pantallas chicas: solo el avance (deja ver la tela colgada) */
+.prela-hud.compact {
+  min-width: 0;
+}
+
+.prela-hud.compact .hud-title {
+  margin-bottom: 2px;
+}
+
+.prela-hud.compact .prela-hud-prog,
+.prela-hud.compact .prela-hud-steps {
+  display: none;
+}
+
+.prela-hud.compact .prela-hud-time {
+  font-size: 20px;
+}
+
+.prela-hud.compact .meter {
+  margin: 4px 0 0;
 }
 
 .prela-hud-prog {
@@ -530,4 +581,72 @@
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
   }
+}
+
+/* "Mientras lava…": datos del oficio que rotan durante el ciclo */
+.prela-tip {
+  margin: 0 0 12px;
+  padding: 10px 12px 9px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #e3f1ef, #f3f8f4);
+  border: 1px solid rgba(47, 111, 106, 0.18);
+  animation: prela-in 0.3s ease both;
+}
+
+.prela-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.prela-tip-ico {
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.prela-tip-text {
+  min-height: 54px;
+  margin: 5px 0 6px;
+  font-size: 13px;
+  line-height: 1.42;
+  color: var(--ink);
+}
+
+.prela-tip-text.in {
+  animation: prela-tip-in 0.35s ease both;
+}
+
+@keyframes prela-tip-in {
+  from {
+    opacity: 0.2;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.prela-tip-dots {
+  display: flex;
+  gap: 5px;
+}
+
+.prela-tip-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(47, 111, 106, 0.22);
+  transition: background 0.2s, width 0.2s;
+}
+
+.prela-tip-dots i.on {
+  width: 16px;
+  border-radius: 999px;
+  background: var(--teal);
 }

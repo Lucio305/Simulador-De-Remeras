@@ -5,6 +5,7 @@
 // de una costura antes de decidir: si el hilo no acompaña, las puntadas se cortan.
 
 import { createRetazo, maxStretchOf } from './hilo/retazo.js';
+import { placeWorldLabel } from './hilo/labels.js';
 import { fabricSwatch } from '../materials/fabric.js';
 import { clamp, hexToRgb, mixHex, money } from '../core/utils.js';
 
@@ -63,6 +64,16 @@ export function threadProblem(fabric, thread) {
   if (thread.elastic < 0.3 && fabric.knit) return 'rigid';
   return 'wavy';
 }
+
+// "hasta 160 g/m²" / "130–220 g/m²" / "desde 210 g/m²"
+export function thicknessRange(t) {
+  if (t.minGsm <= 0) return `hasta ${t.maxGsm} g/m²`;
+  if (t.maxGsm >= 999) return `desde ${t.minGsm} g/m²`;
+  return `${t.minGsm}–${t.maxGsm} g/m²`;
+}
+
+// Nombre corto en minúscula: "Grueso (Tex 40)" → "grueso (Tex 40)"
+const lowerName = (t) => t.name.charAt(0).toLowerCase() + t.name.slice(1);
 
 export function thicknessProblem(catalog, fabric, thicknessId) {
   const t = catalog.THREAD_THICKNESS.find((x) => x.id === thicknessId);
@@ -128,15 +139,19 @@ export function scoreThread(catalog, state, { auto = false } = {}) {
     notes.push(`${NO} El <b>nylon texturizado</b> estira de más para ${fabric.short}: la costura queda ondulada y floja (−40). Brilla en el overlock de tejidos de punto finos.`);
   }
 
+  // grosor: se explica con el rango de gramaje de cada hilo (catálogo), no con
+  // "liviana/pesada", para que coincida con lo que muestra cada paso
   const thick = thicknessProblem(catalog, fabric, t.thickness);
   const th = catalog.THREAD_THICKNESS.find((x) => x.id === t.thickness);
+  const fits = catalog.THREAD_THICKNESS.filter((x) => fabric.gsm >= x.minGsm && fabric.gsm <= x.maxGsm).map((x) => `<b>${lowerName(x)}</b>`);
+  const use = fits.length ? `Para ${fabric.gsm} g/m² va el ${fits.join(' o el ')}.` : '';
   if (!thick) {
     score += 25;
-    notes.push(`${OK} Grosor ${th ? th.name : t.thickness} justo para una tela de ${fabric.gsm} g/m².`);
+    notes.push(`${OK} Grosor <b>${th ? lowerName(th) : t.thickness}</b> justo para tu tela de ${fabric.gsm} g/m²${th ? ` (rinde ${thicknessRange(th)})` : ''}.`);
   } else if (thick === 'thick') {
-    notes.push(`${NO} ${th.name} es grueso para ${fabric.gsm} g/m²: frunce la costura y deja agujeros marcados (−25). Regla: tela liviana, hilo fino.`);
+    notes.push(`${NO} El ${lowerName(th)} es para telas ${thicknessRange(th)}: en ${fabric.gsm} g/m² frunce la costura y deja agujeros marcados (−25). ${use}`);
   } else {
-    notes.push(`${NO} ${th.name} es fino para ${fabric.gsm} g/m²: la costura queda débil para ese gramaje (−25). Regla: a más gramaje, hilo más grueso.`);
+    notes.push(`${NO} El ${lowerName(th)} rinde ${thicknessRange(th)}: en ${fabric.gsm} g/m² la costura queda débil (−25). ${use} A más gramaje, hilo más grueso.`);
   }
 
   const np = needlePoints(fabric, t.needle);
@@ -259,12 +274,18 @@ export default {
     // donde la escena libre es solo la franja de arriba del panel)
     const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
     const mainView = () => (isMobile() ? { position: [-4.1, 1.56, 1.75], target: [-4.1, 1.43, -2.6] } : { position: [-4.1, 1.6, 0.2], target: [-4.1, 1.47, -2.6] });
-    ctx.flyTo(mainView(), 1.3);
+    // vuelos de cámara (se recuerda el destino para el ayudante de pruebas)
+    let lastView = null;
+    const fly = (view, d) => {
+      lastView = view;
+      return ctx.flyTo(view, d);
+    };
+    fly(mainView(), 1.3);
     let layoutMobile = isMobile();
     ctx.listen(window, 'resize', () => {
       if (isMobile() === layoutMobile || busy) return;
       layoutMobile = isMobile();
-      ctx.flyTo(closeup ? closeView() : mainView(), 0.8);
+      fly(closeup ? closeView() : mainView(), 0.8);
     });
     let closeup = false;
     let yaw = 0;
@@ -283,22 +304,45 @@ export default {
       ),
     );
 
-    // retazo de prueba
-    const retazo = createRetazo({ h, listen: ctx.listen, height: 118, seam: true, idleText: 'tirá →' });
+    // retazo de prueba. En pantallas altas de escritorio queda fijo arriba del panel (con
+    // un resumen de una línea); el detalle del veredicto va debajo y se desplaza con el
+    // resto. En pantallas bajas y en el celular no queda fijo: cuando se lo pasa de largo
+    // aparece una barrita arriba con el resumen y "Probar".
+    const STICKY_MQ = '(min-width: 821px) and (min-height: 860px)';
+    const isSticky = () => window.matchMedia(STICKY_MQ).matches;
+    const retazo = createRetazo({ h, listen: ctx.listen, height: 118, seam: true, idleText: 'tirá →', staleText: null, scrollVerdict: () => !isSticky() });
     ctx.onUpdate((dt) => retazo.update(dt));
     retazo.onResult((res) => showVerdict(res));
+    retazo.onReset((why) => renderSum(why === 'pull' ? 'pulling' : why === 'stale' ? 'stale' : 'idle'));
+    const sumEl = h('div', { class: 'hilo-sum', 'aria-live': 'polite' });
     const testBox = h(
       'div',
       { class: 'hilo-test' },
       h('div', { class: 'hilo-test-head' }, h('b', {}, '🧪 Prueba en un retazo'), h('span', {}, fabric.knit ? 'puntada zigzag (punto)' : 'puntada recta (plano)')),
       retazo.el,
+      sumEl,
+    );
+    const verdictBox = retazo.verdictEl;
+    verdictBox.classList.add('hilo-verdict-box');
+    const miniSum = h('span', { class: 'hilo-mini-sum' });
+    const mini = h(
+      'div',
+      { class: 'hilo-mini' },
+      h(
+        'div',
+        { class: 'hilo-mini-inner' },
+        h('span', { class: 'hilo-mini-ico', 'aria-hidden': 'true' }, '🧪'),
+        miniSum,
+        h('button', { class: 'btn btn-secondary btn-sm hilo-mini-btn', type: 'button', tabindex: '-1', onClick: () => testFromMini() }, '🖐 Probar ↑'),
+      ),
     );
 
     // 1 · tipo de hilo
     const threadCards = new Map();
     const threadGrid = h('div', { class: 'hilo-threads', role: 'listbox', 'aria-label': 'Tipo de hilo' });
     for (const t of THREADS) {
-      const spool = h('span', { class: 'hilo-spool', style: { '--sheen': String(0.15 + t.sheen * 0.55) } }, h('span', { class: 'hilo-spool-thread' }));
+      const spool = h('span', { class: 'hilo-spool' }, h('span', { class: 'hilo-spool-thread' }));
+      spool.style.setProperty('--sheen', String(0.15 + t.sheen * 0.55));
       const card = h(
         'button',
         { class: 'hilo-card', type: 'button', role: 'option', dataset: { id: t.id }, onClick: () => selectThread(t.id, 'panel') },
@@ -318,13 +362,20 @@ export default {
 
     // 2 · color
     const matchToggle = ui.toggle({ label: 'Igual a la tela (al tono)', value: sel.match, onChange: (v) => selectMatch(v) });
+    // color personalizado: mientras se arrastra el selector solo cambian los dibujos del
+    // panel y el retazo; los materiales 3D (uno nuevo por tono) se aplican al soltar
+    let colorTimer = 0;
+    let pendingHex = null; // color personalizado todavía sin aplicar
+    const colorIdOf = (hex) => FABRIC_COLORS.find((c) => c.hex.toLowerCase() === String(hex).toLowerCase())?.id || null;
     const palette = ui.colorPalette({
       colors: FABRIC_COLORS,
       value: sel.color,
       allowCustom: true,
-      onChange: (hex, c) => selectColor(hex, c ? c.id : null),
+      onChange: (hex, c) => (c ? selectColor(hex, c.id) : previewCustomColor(hex)),
     });
     palette.classList.add('hilo-palette');
+    const customInput = palette.querySelector('input[type=color]');
+    if (customInput) ctx.listen(customInput, 'change', () => selectColor(customInput.value, colorIdOf(customInput.value)));
     const paletteWrap = h('div', { class: 'hilo-palette-wrap' }, h('p', { class: 'hilo-small' }, 'Pespunte en contraste: elegí un color que se distinga de la tela.'), palette);
     const zoomBtn = h('button', { class: 'btn btn-secondary btn-sm hilo-zoom', type: 'button', onClick: () => toggleCloseup() }, '🔍 Ver la costura de cerca');
 
@@ -332,8 +383,7 @@ export default {
     const thickGrid = ui.optionGrid({
       options: THREAD_THICKNESS.map((t) => {
         const [nm, tex] = t.name.split(' (');
-        const range = t.minGsm <= 0 ? `hasta ${t.maxGsm} g/m²` : t.maxGsm >= 999 ? `desde ${t.minGsm} g/m²` : `${t.minGsm}–${t.maxGsm} g/m²`;
-        return { id: t.id, label: `${nm}`, sub: `${tex ? tex.replace(')', '') + ' · ' : ''}${range}` };
+        return { id: t.id, label: `${nm}`, sub: `${tex ? tex.replace(')', '') + ' · ' : ''}${thicknessRange(t)}` };
       }),
       value: sel.thickness,
       columns: 3,
@@ -369,8 +419,10 @@ export default {
     const body = h(
       'div',
       { class: 'hilo-panel' },
+      mini,
       fabChip,
       testBox,
+      verdictBox,
       ui.section('1 · Tipo de hilo', threadGrid, threadDesc),
       ui.section('2 · Color del hilo', matchToggle, paletteWrap, zoomBtn),
       ui.section('3 · Grosor', thickGrid),
@@ -388,43 +440,101 @@ export default {
       ],
     });
     ui.panelEl?.classList.add('hilo-step');
+    ctx.track(() => ui.panelEl?.style.removeProperty('--hilo-sticky-h'));
+    const bodyEl = ui.bodyEl;
+    // barrita de resumen cuando el retazo quedó arriba, fuera de la vista
+    let stickyH = '';
+    function updateMini() {
+      const sticky = isSticky();
+      const sh = sticky ? `${testBox.offsetHeight + 6}px` : '0px';
+      if (sh !== stickyH) ui.panelEl?.style.setProperty('--hilo-sticky-h', (stickyH = sh));
+      const out = !sticky && !busy && !!bodyEl && testBox.getBoundingClientRect().bottom < bodyEl.getBoundingClientRect().top + 28;
+      mini.classList.toggle('show', out);
+    }
+    if (bodyEl) ctx.listen(bodyEl, 'scroll', updateMini, { passive: true });
+    ctx.listen(window, 'resize', updateMini);
+    function testFromMini() {
+      if (busy) return;
+      testBox.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      ctx.timeout(() => retazo.pull(), 260);
+    }
     ui.hint(isMobile() ? 'Arrastrá la pinza roja del retazo para probar la costura · tocá un cono del rack para elegir el hilo' : 'Arrastrá la pinza roja del retazo (o <kbd>Espacio</kbd>) para probar la costura · tocá un cono del rack o usá <kbd>←</kbd> <kbd>→</kbd> para cambiar de hilo');
     ctx.timeout(() => ui.hint(null), 9000);
 
     // ---------- veredicto del retazo ----------
-    function showVerdict({ maxF, broken }) {
+    // Cada ítem: [tipo, área, palabra corta (resumen), detalle en HTML]
+    function showVerdict({ maxF, broken, noThread }) {
+      if (noThread) {
+        retazo.setVerdict(null);
+        renderSum('nothread');
+        return;
+      }
       const t = catalog.threadById(sel.id);
       const prob = threadProblem(fabric, t);
       const thick = thicknessProblem(catalog, fabric, sel.thickness);
+      const th = THREAD_THICKNESS.find((x) => x.id === sel.thickness);
       const items = [];
       const typeBreak = prob === 'weak' || prob === 'rigid';
+      const nCut = `<b>${broken}</b> puntada${broken === 1 ? '' : 's'}`;
       // 1) el hilo
       if (typeBreak) {
-        if (broken > 0) items.push(['bad', `Se cortaron <b>${broken}</b> puntada${broken === 1 ? '' : 's'}: ${prob === 'weak' ? 'el rayón es lindo pero débil, no sirve para armar' : 'el algodón no estira y el punto sí'}.`]);
-        else items.push(['warn', 'Tiraste poquito: estirala hasta el fondo para probar de verdad.']);
-      } else if (prob === 'wavy') items.push(['bad', 'La costura quedó <b>ondulada</b>: el nylon estira más que esta tela y la frunce.']);
-      else if (maxF < 0.7 && broken === 0) items.push(['warn', 'Tiraste poquito: estirala hasta el fondo para probar de verdad.']);
-      else if (broken === 0) items.push(['ok', fabric.knit ? 'La costura acompañó el estiramiento <b>sin cortarse</b>.' : 'La costura aguantó firme el tirón.']);
+        if (broken > 0) items.push(['bad', 'Hilo', 'se corta', `Se cortaron ${nCut}: ${prob === 'weak' ? 'el rayón es lindo pero débil, no sirve para armar' : 'el algodón no estira y el punto sí'}.`]);
+        else items.push(['warn', 'Hilo', 'tirá más', 'Tiraste poquito: estirala hasta el fondo para probar de verdad.']);
+      } else if (prob === 'wavy') items.push(['bad', 'Hilo', 'ondula', 'La costura quedó <b>ondulada</b>: el nylon estira más que esta tela y la frunce.']);
+      else if (maxF < 0.7 && broken === 0) items.push(['warn', 'Hilo', 'tirá más', 'Tiraste poquito: estirala hasta el fondo para probar de verdad.']);
+      else if (broken === 0) items.push(['ok', 'Hilo', 'aguanta', fabric.knit ? 'La costura acompañó el estiramiento <b>sin cortarse</b>.' : 'La costura aguantó firme el tirón.']);
       // 2) la aguja
       if (fabric.knit) {
-        if (sel.needle === 'microtex') items.push(['bad', 'Aparecieron <b>agujeritos y carreras</b>: la aguja afilada corta las mallas del punto.']);
-        else if (sel.needle === 'universal') items.push(['warn', 'Hay <b>puntadas salteadas</b>: la universal a veces no engancha en el punto.']);
-        else items.push(['ok', 'Puntadas parejas: la punta bola separa las mallas sin romperlas.']);
-      } else if (sel.needle === 'punta_bola') items.push(['bad', 'Muchas <b>puntadas salteadas</b>: la punta bola no perfora limpio el tejido plano.']);
-      else if (sel.needle === 'universal') items.push(['warn', 'Una puntada salteada: anda, pero la microtex es más prolija.']);
-      else items.push(['ok', 'Puntadas parejas: la microtex perfora limpio.']);
-      // 3) el grosor
-      if (!sel.thickness) items.push(['warn', 'Todavía no elegiste el <b>grosor</b> del hilo.']);
-      else if (thick === 'thick') items.push(['warn', 'La costura <b>frunce</b>: hilo grueso para una tela tan liviana.']);
+        if (sel.needle === 'microtex') items.push(['bad', 'Aguja', 'agujeros', 'Aparecieron <b>agujeritos y carreras</b>: la aguja afilada corta las mallas del punto.']);
+        else if (sel.needle === 'universal') items.push(['warn', 'Aguja', 'saltea', 'Hay <b>puntadas salteadas</b>: la universal a veces no engancha en el punto.']);
+        else items.push(['ok', 'Aguja', 'pareja', 'Puntadas parejas: la punta bola separa las mallas sin romperlas.']);
+      } else if (sel.needle === 'punta_bola') items.push(['bad', 'Aguja', 'saltea', 'Muchas <b>puntadas salteadas</b>: la punta bola no perfora limpio el tejido plano.']);
+      else if (sel.needle === 'universal') items.push(['warn', 'Aguja', 'saltea una', 'Una puntada salteada: anda, pero la microtex es más prolija.']);
+      else items.push(['ok', 'Aguja', 'pareja', 'Puntadas parejas: la microtex perfora limpio.']);
+      // 3) el grosor (con el rango de gramaje de cada hilo, igual que en la ficha de la tela)
+      if (!sel.thickness || !th) items.push(['warn', 'Grosor', 'sin elegir', 'Todavía no elegiste el <b>grosor</b> del hilo.']);
+      else if (thick === 'thick') items.push(['warn', 'Grosor', 'frunce', `La costura <b>frunce</b>: el ${lowerName(th)} es para telas ${thicknessRange(th)} y la tuya tiene ${fabric.gsm} g/m².`]);
       else if (thick === 'thin') {
-        if (broken > 0 && !typeBreak) items.push(['bad', `Se cortaron <b>${broken}</b> puntada${broken === 1 ? '' : 's'}: hilo muy fino para una tela de ${fabric.gsm} g/m².`]);
-        else items.push(['warn', `Hilo <b>fino</b> para ${fabric.gsm} g/m²: la costura queda débil.`]);
-      } else items.push(['ok', 'El grosor del hilo está en proporción con la tela.']);
+        if (broken > 0 && !typeBreak) items.push(['bad', 'Grosor', 'se corta', `Se cortaron ${nCut}: el ${lowerName(th)} rinde ${thicknessRange(th)} y tu tela tiene ${fabric.gsm} g/m².`]);
+        else items.push(['warn', 'Grosor', 'débil', `El ${lowerName(th)} rinde ${thicknessRange(th)}: en ${fabric.gsm} g/m² la costura queda débil.`]);
+      } else items.push(['ok', 'Grosor', 'justo', `El ${lowerName(th)} va justo con tus ${fabric.gsm} g/m².`]);
       const icon = { ok: '✓', warn: '!', bad: '✗' };
-      retazo.setVerdict(h('ul', { class: 'hilo-verdict' }, ...items.map(([k, html]) => h('li', { class: k }, h('i', {}, icon[k]), h('span', { html })))));
+      retazo.setVerdict(h('ul', { class: 'hilo-verdict' }, ...items.map(([k, , , html]) => h('li', { class: k }, h('i', {}, icon[k]), h('span', { html })))));
+      renderSum('result', items);
       const worst = items.some((i) => i[0] === 'bad') ? 'bad' : items.some((i) => i[0] === 'warn') ? 'warn' : 'ok';
       audio.play(worst === 'ok' ? 'good' : worst === 'bad' ? 'bad' : 'pop');
       tested = true;
+    }
+
+    // Resumen de una línea (debajo del retazo y en la barrita): fichas ✓ / ! / ✗ por área.
+    let lastItems = null;
+    function renderSum(mode, items) {
+      if (items) lastItems = items;
+      const icon = { ok: '✓', warn: '!', bad: '✗' };
+      const chips = (list, words) =>
+        list.map(([k, area, word, html]) => `<span class="hilo-chip ${k}" title="${html.replace(/<[^>]+>/g, '').replace(/"/g, '&quot;')}"><i>${icon[k]}</i><span>${area}${words ? `<em> · ${word}</em>` : ''}</span></span>`).join('');
+      let main;
+      let small;
+      if (mode === 'result' && lastItems) {
+        main = chips(lastItems, true);
+        small = chips(lastItems, false);
+      } else if (mode === 'stale' && lastItems) {
+        main = `<span class="hilo-sum-text">Cambiaste algo: <b>tirá de nuevo</b> para probar.</span>`;
+        small = 'Cambiaste algo: probá de nuevo';
+      } else if (mode === 'pulling') {
+        main = '<span class="hilo-sum-text">Tirando… mirá las puntadas.</span>';
+        small = 'Tirando…';
+      } else if (mode === 'nothread') {
+        main = '<span class="hilo-sum-text warn">Primero elegí un <b>tipo de hilo</b>: así el retazo solo tiene alfileres.</span>';
+        small = 'Falta elegir el hilo';
+      } else {
+        main = '<span class="hilo-sum-text">Arrastrá la pinza roja (o tocá <b>Tirar</b>) para probar tu combinación.</span>';
+        small = 'Probá tu costura en el retazo';
+      }
+      sumEl.innerHTML = main;
+      sumEl.className = `hilo-sum is-${mode}`;
+      miniSum.innerHTML = small;
+      requestAnimationFrame(() => ctx.alive && updateMini());
     }
 
     // ---------- aplicar ----------
@@ -459,7 +569,8 @@ export default {
       const tid = sel.id || state.thread.id;
       shirt.setThreadColor(sel.color, tid);
       props.sewingMachine?.setThreadColor?.(sel.color, tid);
-      props.overlock?.setThreadColor?.(sel.color, tid);
+      // la overlock siempre usa nylon texturizado: solo cambia el color de sus conos
+      props.overlock?.setThreadColor?.(sel.color);
       for (const s of spools) {
         if (sel.id && s.threadId === sel.id) {
           if (s.color !== sel.color) s.setColor(sel.color);
@@ -508,6 +619,8 @@ export default {
 
     function selectColor(hex, colorId) {
       if (busy) return;
+      clearTimeout(colorTimer);
+      pendingHex = null;
       sel.match = false;
       sel.color = hex;
       sel.colorId = colorId;
@@ -515,21 +628,45 @@ export default {
       refresh();
     }
 
+    function previewCustomColor(hex) {
+      if (busy) return;
+      for (const { spool } of threadCards.values()) {
+        spool.style.setProperty('--thread', hex);
+        spool.style.setProperty('--thread-dark', mixHex(hex, '#000000', 0.35));
+      }
+      retazo.setConfig({ threadColor: hex });
+      pendingHex = hex;
+      clearTimeout(colorTimer);
+      colorTimer = ctx.timeout(() => selectColor(hex, colorIdOf(hex)), 280);
+    }
+
     // ---------- teclado: ← → cambian de hilo, Espacio tira del retazo ----------
+    // Después de tocar una opción con el mouse el foco queda en ese botón: Espacio tira
+    // igual del retazo (si se llegó con Tab, el botón conserva su Espacio de siempre).
+    // (se sigue a mano cómo llegó el foco: :focus-visible empieza a valer apenas se toca
+    // una tecla, así que no sirve para distinguir)
+    let focusByKeyboard = false;
+    ctx.listen(window, 'pointerdown', () => (focusByKeyboard = false), true);
+    ctx.listen(window, 'keydown', (e) => e.key === 'Tab' && (focusByKeyboard = true), true);
+    const keyboardFocus = () => focusByKeyboard;
     ctx.listen(window, 'keydown', (e) => {
       if (busy || e.defaultPrevented || e.repeat) return;
       const tg = e.target && e.target.closest ? e.target : null;
-      if (tg && tg.closest('input, textarea, select')) return;
+      if (tg && tg.closest('textarea, select, input:not([type=checkbox]):not([type=radio])')) return;
       if (document.querySelector('.modal-wrap')) return;
+      const ctl = tg && tg.closest('button, input, [role=option]');
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
         const i = THREADS.findIndex((t) => t.id === sel.id);
         const n = THREADS.length;
         const j = i < 0 ? (e.key === 'ArrowRight' ? 0 : n - 1) : (i + (e.key === 'ArrowRight' ? 1 : -1) + n) % n;
         selectThread(THREADS[j].id, 'key');
-      } else if ((e.code === 'Space' || e.key === ' ') && !(tg && tg.closest('button'))) {
+      } else if (e.code === 'Space' || e.key === ' ') {
+        if (ctl && keyboardFocus(ctl)) return;
         e.preventDefault();
+        if (ctl) ctl.blur();
         retazo.pull();
+        testBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
     });
 
@@ -537,16 +674,18 @@ export default {
     function closeView() {
       const pat = shirt.pattern;
       const m = pat?.measurements || { chest: 52, length: 72 };
-      const x = (m.chest / 200) * 0.55;
-      const y = -m.length / 100 + 0.035;
+      // el pespunte doble del ruedo cruzando el cuadro (abajo), con tela arriba y el
+      // costado a la derecha
+      const x = (m.chest / 200) * 0.46;
+      const y = -m.length / 100 + 0.1;
       shirt.group.rotation.y = 0;
       shirt.group.updateMatrixWorld(true);
       const { position, normal } = shirt.garmentToLocal('frente', x, y, 0);
       const wp = shirt.group.localToWorld(position.clone());
       const wn = normal.clone().transformDirection(shirt.group.matrixWorld);
-      const dist = isMobile() ? 0.7 : 0.42;
-      const cam = wp.clone().addScaledVector(wn, dist).add(new THREE.Vector3(0.06, 0.12, 0));
-      return { position: cam.toArray(), target: wp.clone().add(new THREE.Vector3(0, 0.02, 0)).toArray() };
+      const dist = isMobile() ? 0.62 : 0.36;
+      const cam = wp.clone().addScaledVector(wn, dist).add(new THREE.Vector3(0.06, 0.01, 0));
+      return { position: cam.toArray(), target: wp.toArray() };
     }
     function toggleCloseup(force) {
       closeup = force === undefined ? !closeup : !!force;
@@ -554,10 +693,10 @@ export default {
       zoomBtn.classList.toggle('on', closeup);
       if (closeup) {
         yaw = 0;
-        ctx.flyTo(closeView(), 1.0);
+        fly(closeView(), 1.0);
         ui.hint('Este es el pespunte del ruedo: así se va a ver tu hilo sobre la tela');
         ctx.timeout(() => closeup && ui.hint(null), 5000);
-      } else ctx.flyTo(mainView(), 1.0);
+      } else fly(mainView(), 1.0);
     }
 
     // ---------- interacción 3D: conos del rack ----------
@@ -574,21 +713,14 @@ export default {
     const placeLabel = (el, obj, dy) => {
       obj.getWorldPosition(tmp);
       tmp.y += dy;
-      const sp = engine.worldToScreen(tmp);
-      const W = engine.canvas.clientWidth || window.innerWidth;
-      const H = engine.canvas.clientHeight || window.innerHeight;
-      const off = sp.behind || sp.x < -W * 0.2 || sp.x > W * 1.2 || sp.y < 0 || sp.y > H;
-      el.style.display = off ? 'none' : '';
-      // que no se salga de la pantalla (p. ej. el rollo cortado por el borde en el celular)
-      const half = (el.offsetWidth || 80) / 2 + 8;
-      el.style.left = `${Math.min(Math.max(sp.x, half), W - half)}px`;
-      el.style.top = `${sp.y}px`;
+      placeWorldLabel(engine, el, tmp, ui.panelEl);
     };
     const canvas = engine.canvas;
     ctx.track(() => (canvas.style.cursor = ''));
     let hovered = null;
     let moved = true;
     let down = null;
+    let lastMiniCheck = 0;
     const spoolOf = (obj) => {
       while (obj) {
         const s = spools.find((sp) => sp.group === obj);
@@ -626,6 +758,11 @@ export default {
         yaw = Math.sin(phase) * 14 * DEG;
       }
       shirt.group.rotation.y = yaw;
+      // la barrita también se revisa de vez en cuando (scroll suave, cambios de alto del panel)
+      if (t - lastMiniCheck > 0.3) {
+        lastMiniCheck = t;
+        updateMini();
+      }
       if (dirty && t - lastApply > 0.06) {
         lastApply = t;
         apply3D();
@@ -655,6 +792,8 @@ export default {
     // ---------- confirmar ----------
     async function confirm(auto) {
       if (busy) return;
+      // si quedó un color personalizado sin aplicar (se confirmó enseguida), se aplica ya
+      if (pendingHex && !auto) selectColor(pendingHex, colorIdOf(pendingHex));
       if (auto) {
         sel = { ...defaultsFor(catalog, state) };
         refresh();
@@ -686,15 +825,36 @@ export default {
       if (!ctx.alive) return;
       const th = THREAD_THICKNESS.find((x) => x.id === sel.thickness);
       const nd = NEEDLES.find((x) => x.id === sel.needle);
+      const spoolEl = h('span', { class: 'hilo-spool' }, h('span', { class: 'hilo-spool-thread' }));
+      spoolEl.style.setProperty('--thread', sel.color);
+      spoolEl.style.setProperty('--thread-dark', mixHex(sel.color, '#000000', 0.35));
+      spoolEl.style.setProperty('--sheen', String(0.15 + thread.sheen * 0.55));
       const extra = h(
         'div',
         { class: 'hilo-result' },
-        h('span', { class: 'hilo-spool', style: { '--thread': sel.color, '--thread-dark': mixHex(sel.color, '#000000', 0.35), '--sheen': String(0.15 + thread.sheen * 0.55) } }, h('span', { class: 'hilo-spool-thread' })),
+        spoolEl,
         h('span', {}, h('b', {}, thread.name), h('br'), `${th ? th.name : sel.thickness} · aguja ${nd ? nd.name.replace(/\s*\(.*\)/, '').toLowerCase() : sel.needle} · ${sel.match ? 'al tono' : 'en contraste'}`),
       );
       await ctx.complete({ score, notes, extra });
     }
 
+    // ayudante para pruebas automáticas (el render por software va a ~1 fps)
+    ctx.step._test = {
+      land: () => lastView && engine.flyTo({ ...lastView, duration: 0 }),
+      ff: (sec = 1) => {
+        for (let i = 0; i < sec * 60; i++) retazo.update(1 / 60);
+      },
+      get draws() {
+        return retazo.draws;
+      },
+      mini: () => {
+        updateMini();
+        return { show: mini.classList.contains('show'), testBottom: testBox.getBoundingClientRect().bottom, bodyTop: bodyEl.getBoundingClientRect().top, sticky: isSticky(), busy };
+      },
+    };
+    ctx.track(() => delete ctx.step._test);
+
+    renderSum('idle');
     refresh();
     apply3D();
   },

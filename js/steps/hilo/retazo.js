@@ -7,6 +7,10 @@
 //
 // Uso: const r = createRetazo({ h, listen, seam: true }); panel.append(r.el);
 //      ctx.onUpdate((dt) => r.update(dt)); r.setConfig({...}); r.onResult((res) => ...)
+//      r.onReset(() => ...)  (la prueba anterior dejó de valer: se tiró de nuevo o cambió algo)
+//      r.verdictEl se puede mover a otro lugar del panel (por defecto va debajo del retazo).
+// El canvas solo se redibuja mientras algo se mueve (tirón, rebote, partículas) o cuando
+// cambia la configuración / el tamaño: quieto no gasta CPU.
 
 import { fabricSwatch } from '../../materials/fabric.js';
 import { audio } from '../../core/audio.js';
@@ -20,16 +24,18 @@ export function maxStretchOf(fabric) {
 const REST_SCALE = 1.56; // largo útil / largo en reposo (deja lugar para estirar)
 const PAD = 22;
 
-export function createRetazo({ h, listen, height = 124, seam = true, idleText = 'tirá →', staleText = 'Cambiaste algo: tirá de nuevo para probar.' } = {}) {
+export function createRetazo({ h, listen, height = 124, seam = true, idleText = 'tirá →', staleText = 'Cambiaste algo: tirá de nuevo para probar.', scrollVerdict = () => true } = {}) {
   const canvas = h('canvas', { class: 'hilo-retazo-canvas', style: { height: `${height}px` }, 'aria-label': 'Retazo de prueba: arrastrá hacia la derecha para estirarlo' });
   const pctEl = h('span', { class: 'hilo-retazo-pct' }, '0 %');
   const stateEl = h('span', { class: 'hilo-retazo-state' }, '');
   const btn = h('button', { class: 'btn btn-secondary btn-sm hilo-retazo-btn', type: 'button' }, '🖐 Tirar');
   const verdictEl = h('div', { class: 'hilo-retazo-verdict' });
+  // indicación "tirá →" (DOM con animación CSS: así el canvas puede quedarse quieto)
+  const idleEl = h('span', { class: 'hilo-retazo-idle', 'aria-hidden': 'true' }, idleText);
   const el = h(
     'div',
     { class: `hilo-retazo${seam ? ' is-seam' : ''}` },
-    h('div', { class: 'hilo-retazo-stage' }, canvas),
+    h('div', { class: 'hilo-retazo-stage' }, canvas, idleEl),
     h('div', { class: 'hilo-retazo-bar' }, h('span', { class: 'hilo-retazo-read' }, h('b', {}, 'Estira '), pctEl, stateEl), btn),
     verdictEl,
   );
@@ -66,10 +72,11 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
   let snapCooldown = 0;
   let particles = [];
   let shake = 0;
-  let time = 0;
   let resultFn = null;
+  let resetFn = null;
   let W = 0;
   let dpr = 1;
+  let dirty = true; // hay que redibujar aunque esté quieto
 
   const usable = () => Math.max(60, W - PAD * 2 - 18);
   const restLen = () => usable() / REST_SCALE;
@@ -105,7 +112,10 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
     const url = fabricSwatch(cfg.fabricId, cfg.color, 192, { heather: cfg.heather });
     const im = new Image();
     im.onload = () => {
-      if (imgKey === key) img = im;
+      if (imgKey === key) {
+        img = im;
+        dirty = true;
+      }
     };
     im.src = url;
   }
@@ -120,6 +130,10 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
       canvas.width = Math.round(W * dpr);
       canvas.height = Math.round(height * dpr);
       if (first || !stitches.length) buildStitches();
+      // la indicación va a la derecha de la pinza roja
+      idleEl.style.left = `${Math.round(PAD + restLen() + 20)}px`;
+      idleEl.style.top = `${Math.round(height * 0.44)}px`;
+      dirty = true;
     }
     return W > 0;
   }
@@ -172,16 +186,17 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
       // nueva prueba: si estaba todo cortado de una prueba anterior, se renueva el retazo
       if (resultSent && broken > 0) buildStitches();
       maxF = 0;
+      resetFn && resetFn('pull');
     }
     pulled = true;
     resultSent = false;
     verdictEl.classList.remove('show');
+    dirty = true;
   }
 
   // --------- simulación ---------
   function update(dt) {
     if (!el.isConnected) return;
-    time += dt;
     if (!measure()) return;
     dt = Math.min(dt, 0.05);
     if (auto) {
@@ -198,7 +213,11 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
     }
     const holding = dragging || auto;
     // resorte: firme mientras se sostiene, rebote suave al soltar
-    if (!dragging) {
+    if (!holding && Math.abs(s) < 1e-4 && Math.abs(v) < 2e-3) {
+      // quieto: sin integrar (y sin redibujar si no hay nada más en movimiento)
+      s = 0;
+      v = 0;
+    } else if (!dragging) {
       const k = holding ? 260 : 150;
       const c = holding ? 2 * Math.sqrt(k) : 9;
       const steps = 3;
@@ -237,6 +256,7 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
 
   // efectos, lecturas, veredicto y dibujo del cuadro
   function finishFrame(dt, holding) {
+    const moving = holding || s !== 0 || v !== 0 || particles.length > 0 || shake > 0;
     shake = Math.max(0, shake - dt * 4);
     for (const p of particles) {
       p.life -= dt;
@@ -246,17 +266,28 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
     }
     particles = particles.filter((p) => p.life > 0);
 
-    pctEl.textContent = `${Math.round(Math.max(0, s) * 100)} %`;
-    stateEl.textContent = seam && broken ? ` · ${broken} puntada${broken === 1 ? '' : 's'} cortada${broken === 1 ? '' : 's'}` : '';
-    stateEl.classList.toggle('bad', broken > 0);
+    // lecturas (solo se toca el DOM si cambian)
+    setText(pctEl, `${Math.round(Math.max(0, s) * 100)} %`);
+    setText(stateEl, seam && broken ? ` · ${broken} puntada${broken === 1 ? '' : 's'} cortada${broken === 1 ? '' : 's'}` : '');
+    if (stateEl.classList.contains('bad') !== broken > 0) stateEl.classList.toggle('bad', broken > 0);
 
     // el veredicto llega apenas el retazo vuelve (sin esperar a que deje de rebotar)
     if (pulled && !resultSent && !holding && maxF > 0.05 && s < maxF * cfg.maxStretch * 0.35) {
       resultSent = true;
-      if (seam && cfg.noThread) api.setVerdict(h('div', { class: 'hilo-retazo-stale' }, 'Primero elegí un tipo de hilo: así el retazo solo tiene alfileres.'));
-      else resultFn && resultFn({ maxF, maxStretch: maxF * cfg.maxStretch, broken, total: stitches.length });
+      const res = { maxF, maxStretch: maxF * cfg.maxStretch, broken, total: stitches.length, noThread: !!(seam && cfg.noThread) };
+      if (resultFn) resultFn(res);
+      else if (res.noThread) api.setVerdict(h('div', { class: 'hilo-retazo-stale' }, 'Primero elegí un tipo de hilo: así el retazo solo tiene alfileres.'));
     }
-    draw();
+    const hideIdle = pulled || dragging;
+    if (idleEl.classList.contains('hide') !== hideIdle) idleEl.classList.toggle('hide', hideIdle);
+    if (moving || dirty) {
+      dirty = false;
+      draw();
+    }
+  }
+
+  function setText(node, txt) {
+    if (node.textContent !== txt) node.textContent = txt;
   }
 
   function stitchX(i, x0, scale) {
@@ -275,7 +306,9 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
   }
 
   // --------- dibujo ---------
+  let draws = 0;
   function draw() {
+    draws++;
     const H = height;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
@@ -401,15 +434,6 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
     // pinzas
     drawClamp(x0 - 12 + jx, cy, hh, '#7f868e', false);
     drawClamp(x0 + L - 4 + jx, cy, hh, '#d2553f', true);
-
-    // indicación cuando todavía no se probó
-    if (!pulled && !dragging) {
-      const ax = x0 + L + 22 + Math.sin(time * 4) * 4;
-      g.fillStyle = 'rgba(255,248,239,0.9)';
-      g.font = '800 12px system-ui, sans-serif';
-      g.textAlign = 'left';
-      g.fillText(idleText, ax, cy);
-    }
 
     for (const p of particles) {
       g.globalAlpha = clamp(p.life * 2.4);
@@ -660,6 +684,7 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
       const before = key(cfg);
       cfg = { ...cfg, ...next };
       setImage();
+      dirty = true;
       if (key(cfg) !== before) {
         const hadResult = pulled && resultSent;
         buildStitches();
@@ -668,6 +693,7 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
           resultSent = true;
           maxF = 0;
           if (hadResult) api.setVerdict(staleText ? h('div', { class: 'hilo-retazo-stale' }, staleText) : null);
+          resetFn && resetFn(hadResult ? 'stale' : 'config');
         }
       }
     },
@@ -682,6 +708,14 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
     onResult(fn) {
       resultFn = fn;
     },
+    onReset(fn) {
+      resetFn = fn;
+    },
+    verdictEl,
+    // para pruebas: cuántas veces se redibujó el canvas
+    get draws() {
+      return draws;
+    },
     setVerdict(content) {
       verdictEl.innerHTML = '';
       if (!content) {
@@ -692,6 +726,7 @@ export function createRetazo({ h, listen, height = 124, seam = true, idleText = 
       else verdictEl.appendChild(content);
       verdictEl.classList.add('show');
       // en el celular el veredicto puede quedar abajo del borde del panel
+      if (!scrollVerdict()) return;
       requestAnimationFrame(() => {
         try {
           verdictEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

@@ -5,6 +5,7 @@
 
 import { fabricSwatch } from '../materials/fabric.js';
 import { createRetazo, maxStretchOf } from './hilo/retazo.js';
+import { placeWorldLabel } from './hilo/labels.js';
 import { clamp, money } from '../core/utils.js';
 
 const DEG = Math.PI / 180;
@@ -12,6 +13,16 @@ const OK = '<span class="hilo-mark ok">✓</span>';
 const NO = '<span class="hilo-mark no">✗</span>';
 const MID = '<span class="hilo-mark mid">≈</span>';
 const SWAY = 35 * DEG;
+// Giro de la remera: el arrastre suma hasta ±50° y el total (con el vaivén) se frena
+// suave antes de ±62°: más de perfil se vería el maniquí invisible hueco por la sisa.
+const USER_YAW_MAX = 50 * DEG;
+const YAW_SOFT = 40 * DEG;
+const YAW_MAX = 62 * DEG;
+function softYaw(a) {
+  const m = Math.abs(a);
+  if (m <= YAW_SOFT) return a;
+  return Math.sign(a) * (YAW_SOFT + (YAW_MAX - YAW_SOFT) * Math.tanh((m - YAW_SOFT) / (YAW_MAX - YAW_SOFT)));
+}
 
 // ---------------------------------------------------------------------------
 // Reglas (exportadas para reutilizar en otros pasos / pruebas)
@@ -192,15 +203,37 @@ export default {
       shirt.group.scale.set(1, 1, 1);
     });
     // En el celular la escena libre es una franja chica arriba del panel: se encuadra la
-    // remera con un costado de la estantería (en escritorio, la vista de la estación).
+    // remera con un costado de la estantería. En escritorio, la vista de la estación; si la
+    // ventana es angosta (≈1024–1280 px) el encuadre se corre hacia el maniquí y se aleja
+    // un poco, para que la manga no quede debajo del panel.
     const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
-    const mainView = () => (isMobile() ? { position: [-4.5, 1.32, 1.45], target: [-4.42, 1.12, -2.0] } : ctx.stations.materiales.view);
-    ctx.flyTo(mainView(), 1.4);
-    let layoutMobile = isMobile();
+    const mainView = () => {
+      if (isMobile()) return { position: [-4.5, 1.32, 1.45], target: [-4.42, 1.12, -2.0] };
+      const v = ctx.stations.materiales.view;
+      const panelW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-w')) || 380;
+      const freeW = window.innerWidth - panelW - 24;
+      const k = clamp((1000 - freeW) / (1000 - 600));
+      const dx = 0.34 * k;
+      const back = 0.3 * k;
+      return { position: [v.position[0] + dx, v.position[1] + 0.03 * k, v.position[2] + back], target: [v.target[0] + dx, v.target[1], v.target[2]] };
+    };
+    const viewKey = () => mainView().position.map((n) => n.toFixed(2)).join(',');
+    // vuelos de cámara (se recuerda el destino para el ayudante de pruebas)
+    let lastView = null;
+    const fly = (view, d) => {
+      lastView = view;
+      return ctx.flyTo(view, d);
+    };
+    fly(mainView(), 1.4);
+    let layoutKey = viewKey();
+    let resizeTimer = 0;
     ctx.listen(window, 'resize', () => {
-      if (isMobile() === layoutMobile || busy) return;
-      layoutMobile = isMobile();
-      ctx.flyTo(closeup ? closeView() : mainView(), 0.8);
+      clearTimeout(resizeTimer);
+      resizeTimer = ctx.timeout(() => {
+        if (busy || viewKey() === layoutKey) return;
+        layoutKey = viewKey();
+        fly(closeup ? closeView() : mainView(), 0.8);
+      }, 180);
     });
     let phase = 0;
     let closeup = false;
@@ -250,13 +283,19 @@ export default {
       retazo.el,
     );
 
+    // Color personalizado: mientras se arrastra el selector solo se actualizan la etiqueta y
+    // la miniatura de la tela elegida; la escena 3D (materiales y texturas nuevos por cada
+    // tono) se aplica al soltar o tras una pausa corta.
+    let colorTimer = 0;
     const palette = ui.colorPalette({
       colors: FABRIC_COLORS,
       value: sel.color,
       allowCustom: true,
-      onChange: (hex, c) => selectColor(hex, c ? c.id : colorIdForHex(catalog, hex)),
+      onChange: (hex, c) => (c ? selectColor(hex, c.id) : previewCustomColor(hex)),
     });
     palette.classList.add('tela-palette');
+    const customInput = palette.querySelector('input[type=color]');
+    if (customInput) ctx.listen(customInput, 'change', () => selectColor(customInput.value, colorIdForHex(catalog, customInput.value)));
     if (req.colors) {
       for (const b of palette.querySelectorAll('.swatch-btn[data-id]')) if (req.colors.includes(b.dataset.id)) b.classList.add('tela-req');
     }
@@ -424,9 +463,33 @@ export default {
 
     function selectColor(hex, colorId) {
       if (busy) return;
+      clearTimeout(colorTimer);
+      pendingHex = null;
       sel.color = hex;
       sel.colorId = colorId || null;
       refreshPanel();
+    }
+
+    // vista previa liviana del color personalizado (solo la miniatura de la tela elegida,
+    // como mucho una por cuadro)
+    let previewHex = null;
+    let pendingHex = null; // color personalizado todavía sin aplicar
+    let previewRaf = 0;
+    ctx.track(() => cancelAnimationFrame(previewRaf));
+    function previewCustomColor(hex) {
+      if (busy) return;
+      previewHex = hex;
+      if (!previewRaf) {
+        previewRaf = requestAnimationFrame(() => {
+          previewRaf = 0;
+          const sw = fabCards.get(sel.id)?.sw;
+          if (sw && previewHex && ctx.alive) sw.style.backgroundImage = `url(${fabricSwatch(sel.id, previewHex, 96, { heather: !!sel.heather })})`;
+        });
+      }
+      cardKey = '';
+      pendingHex = hex;
+      clearTimeout(colorTimer);
+      colorTimer = ctx.timeout(() => selectColor(hex, colorIdForHex(catalog, hex)), 280);
     }
 
     function selectHeather(v) {
@@ -452,15 +515,7 @@ export default {
       obj.getWorldPosition(tmp);
       tmp.y += dy;
       tmp.z += dz;
-      const sp = engine.worldToScreen(tmp);
-      const W = engine.canvas.clientWidth || window.innerWidth;
-      const H = engine.canvas.clientHeight || window.innerHeight;
-      const off = sp.behind || sp.x < -W * 0.2 || sp.x > W * 1.2 || sp.y < 0 || sp.y > H;
-      el.style.display = off ? 'none' : '';
-      // que no se salga de la pantalla (p. ej. el rollo cortado por el borde en el celular)
-      const half = (el.offsetWidth || 80) / 2 + 8;
-      el.style.left = `${Math.min(Math.max(sp.x, half), W - half)}px`;
-      el.style.top = `${sp.y}px`;
+      placeWorldLabel(engine, el, tmp, ui.panelEl);
     };
     const canvas = engine.canvas;
     ctx.track(() => (canvas.style.cursor = ''));
@@ -479,9 +534,19 @@ export default {
       }
       return null;
     };
+    // Se elige tocando el rollo o su etiqueta del canto del estante. El paño desenrollado
+    // del rollo elegido cuelga por delante del rollo de abajo: el rayo lo atraviesa, así el
+    // rollo tapado se puede señalar y elegir igual.
+    const shelfLabels = (shelf?.group?.children || []).filter((o) => o.isMesh && o.name === 'etiqueta');
+    const labelRoll = new Map(shelfLabels.length === rolls.length ? shelfLabels.map((m, i) => [m, rolls[i]]) : []);
+    const pickables = [...rolls.map((r) => r.group), ...labelRoll.keys()];
     const pickRoll = () => {
-      const hits = engine.raycast(rolls.map((r) => r.group));
-      return hits.length ? rollOf(hits[0].object) : null;
+      for (const hit of engine.raycast(pickables)) {
+        if (hit.object.name === 'pano') continue;
+        const r = labelRoll.get(hit.object) || rollOf(hit.object);
+        if (r) return r;
+      }
+      return null;
     };
     const onShirt = () => {
       const m = shirt.getPanelMeshes();
@@ -493,7 +558,7 @@ export default {
       if (down && down.onShirt) {
         const dx = p.x - down.lastX;
         down.lastX = p.x;
-        userYaw += dx * 0.012;
+        userYaw = clamp(userYaw + dx * 0.012, -USER_YAW_MAX, USER_YAW_MAX);
         yawVel = dx * 0.012;
         if (Math.abs(p.x - down.x) > 4) down.dragged = true;
       } else if (down && Math.hypot(p.x - down.x, p.y - down.y) > 6) down.dragged = true;
@@ -534,12 +599,13 @@ export default {
       if (!down || !down.onShirt) {
         phase += dt * 0.55;
         userYaw *= Math.exp(-dt * 0.7);
-        userYaw += yawVel;
+        // inercia al soltar (yawVel = giro por cuadro de 60 fps)
+        userYaw = clamp(userYaw + yawVel * Math.min(dt, 0.05) * 60, -USER_YAW_MAX, USER_YAW_MAX);
         yawVel *= Math.exp(-dt * 6);
       }
       pop = Math.max(0, pop - dt * 3.2);
       const s = 1 - 0.035 * Math.sin(pop * Math.PI);
-      shirt.group.rotation.y = Math.sin(phase) * (closeup ? SWAY * 0.3 : SWAY) + userYaw;
+      shirt.group.rotation.y = softYaw(Math.sin(phase) * (closeup ? SWAY * 0.3 : SWAY) + userYaw);
       shirt.group.scale.set(s, s, s);
 
       // aplicar a la escena como mucho cada 70 ms (paleta personalizada = muchos eventos)
@@ -578,11 +644,12 @@ export default {
       const yaw0 = shirt.group.rotation.y;
       shirt.group.rotation.y = 0;
       shirt.group.updateMatrixWorld(true);
-      const { position, normal } = shirt.garmentToLocal('frente', 0.07, -0.2, 0);
+      // pecho, debajo del escote (así no asoma el cuello del maniquí por la boca del cuello)
+      const { position, normal } = shirt.garmentToLocal('frente', 0.07, -0.25, 0);
       const wp = shirt.group.localToWorld(position.clone());
       const wn = normal.clone().transformDirection(shirt.group.matrixWorld);
       shirt.group.rotation.y = yaw0;
-      const cam = wp.clone().addScaledVector(wn, isMobile() ? 0.62 : 0.36).add(new THREE.Vector3(0.08, 0.06, 0));
+      const cam = wp.clone().addScaledVector(wn, isMobile() ? 0.62 : 0.36).add(new THREE.Vector3(0.08, 0.025, 0));
       return { position: cam.toArray(), target: wp.toArray() };
     }
     function toggleCloseup(force) {
@@ -593,15 +660,17 @@ export default {
       if (closeup) {
         userYaw = 0;
         yawVel = 0;
-        ctx.flyTo(closeView(), 1.0);
+        fly(closeView(), 1.0);
         ui.hint('Así se ven la trama y el brillo de tu tela de cerca · cambiá de tela o de color para comparar');
         ctx.timeout(() => closeup && ui.hint(null), 6000);
-      } else ctx.flyTo(mainView(), 1.0);
+      } else fly(mainView(), 1.0);
     }
 
     // ---------- confirmar ----------
     async function confirm(auto) {
       if (busy) return;
+      // si quedó un color personalizado sin aplicar (se confirmó enseguida), se aplica ya
+      if (pendingHex && !auto) selectColor(pendingHex, colorIdForHex(catalog, pendingHex));
       if (auto) {
         const ch = defaultChoice(catalog, order);
         sel = { ...ch };
@@ -626,7 +695,7 @@ export default {
       if (roll) {
         const p = roll.group.getWorldPosition(new THREE.Vector3());
         const back = isMobile() ? 2.6 : 1.55;
-        ctx.flyTo({ position: [p.x + 0.55, p.y + 0.12, p.z + back], target: [p.x + 0.15, p.y - 0.08, p.z] }, 0.9);
+        fly({ position: [p.x + 0.55, p.y + 0.12, p.z + back], target: [p.x + 0.15, p.y - 0.08, p.z] }, 0.9);
       }
       audio.play('snip');
       ctx.timeout(() => audio.play('snip'), 160);
@@ -641,6 +710,16 @@ export default {
       if (!ctx.alive) return;
       await ctx.complete({ score, notes, silent: true });
     }
+
+    // ayudante para pruebas automáticas (el render por software va a ~1 fps)
+    ctx.step._test = {
+      land: () => lastView && engine.flyTo({ ...lastView, duration: 0 }),
+      yaw: () => shirt.group.rotation.y,
+      ff: (sec = 1) => {
+        for (let i = 0; i < sec * 60; i++) retazo.update(1 / 60);
+      },
+    };
+    ctx.track(() => delete ctx.step._test);
 
     refreshPanel();
     apply3D();

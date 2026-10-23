@@ -1,6 +1,7 @@
 // Perilla de temperatura del lavarropas (SVG): arco de frío a caliente con las posiciones de
 // PREWASH.temps, perilla blanca con puntero que se arrastra (o se toca una marca) y salta a la
-// posición más cercana. Teclado: ← → cuando tiene el foco.
+// posición más cercana. Teclado: ← → cuando tiene el foco (↑ ↓ quedan para el centrifugado,
+// como dice la ayuda del paso).
 
 const NS = 'http://www.w3.org/2000/svg';
 const s = (tag, attrs = {}, ...kids) => {
@@ -157,10 +158,10 @@ export function createTempDial({ temps, value, onChange, onTick }) {
   knob.addEventListener('pointerup', end);
   knob.addEventListener('pointercancel', end);
   svg.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
     e.stopPropagation();
-    step(e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : -1);
+    step(e.key === 'ArrowRight' ? 1 : -1);
   });
   function step(d) {
     const i = Math.max(0, Math.min(temps.length - 1, temps.indexOf(cur) + d));

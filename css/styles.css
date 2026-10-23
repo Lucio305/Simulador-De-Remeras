@@ -1061,6 +1061,33 @@ input[type='range']::-moz-range-thumb {
   z-index: 200;
 }
 
+/* Con el panel ancho, la indicación y los avisos se centran en el área libre */
+@media (min-width: 821px) {
+  #app:has(.panel.wide:not(.hidden)) #hint {
+    transform: translate(calc(-50% - 226px), 16px);
+    max-width: min(560px, calc(100vw - 500px));
+  }
+
+  #app:has(.panel.wide:not(.hidden)) #hint.show {
+    transform: translate(calc(-50% - 226px), 0);
+  }
+
+  #app:has(.panel.wide:not(.hidden)) #toasts {
+    transform: translateX(calc(-50% - 226px));
+  }
+}
+
+/* Los botones de un modal largo quedan siempre a la vista */
+.modal-card .modal-foot {
+  position: sticky;
+  bottom: -16px;
+  margin: 10px -22px -16px;
+  padding: 10px 22px 14px;
+  background: var(--card-solid);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 20px 20px;
+}
+
 /* Etiqueta flotante que sigue a un punto 3D */
 .world-label {
   position: absolute;

@@ -12,23 +12,38 @@ import { createLaundryScene, WM } from './prelavado/scene.js';
 import { createTempDial, tempLabel } from './prelavado/dial.js';
 import { clamp, lerp, mixHex, smoothstep, easeInOutCubic } from '../core/utils.js';
 
-const { PREWASH, COSTS, fabricById, luminance } = catalog;
+const { PREWASH, COSTS, FABRICS, fabricById, luminance } = catalog;
 
 const OK = '<span class="prela-mark ok">✓</span> ';
 const NO = '<span class="prela-mark no">✗</span> ';
 const MID = '<span class="prela-mark mid">≈</span> ';
+// nota informativa: mismo lugar que ✓/✗, con un ícono (así toda la lista queda alineada, sin viñetas mezcladas)
+const ICO = (e) => `<span class="prela-mark ico" aria-hidden="true">${e}</span> `;
 const pctTxt = (v) => `${String(Math.round(v * 1000) / 10).replace('.', ',')} %`;
 const mTxt = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
 
 export const DRY_OPTIONS = [
   { id: 'sombra', name: 'Tendido a la sombra', short: 'A la sombra', icon: '🌳', sub: 'El más suave' },
   { id: 'sol', name: 'Tendido al sol', short: 'Al sol', icon: '☀️', sub: 'Seca rápido' },
-  { id: 'secarropas', name: 'Secarropas', short: 'Secarropas', icon: '🌀', sub: 'Con calor' },
+  { id: 'secarropas', name: 'Secarropas', short: 'Secarropas', icon: '♨️', sub: 'Con calor' },
 ];
 const SPIN_INFO = { 400: 'Suave', 800: 'Normal', 1200: 'Fuerte' };
 // fibras que sufren en el secarropas (encogen / se arrugan)
 const DRYER_SENSITIVE = ['algodon_jersey', 'algodon_peinado', 'pique', 'lino', 'modal', 'mezcla'];
 const FIBER_WORD = { algodon_jersey: 'el algodón', algodon_peinado: 'el algodón peinado', pique: 'el piqué de algodón', lino: 'el lino', poliester: 'el poliéster', modal: 'el modal', mezcla: 'la mezcla 50/50' };
+
+// ---------- Regla del oficio, armada desde el catálogo (FABRICS.washTemp) ----------
+const lowerFirst = (t = '') => t.charAt(0).toLowerCase() + t.slice(1);
+const joinY = (arr) => (arr.length <= 1 ? arr.join('') : `${arr.slice(0, -1).join(', ')} y ${arr[arr.length - 1]}`);
+// [{ temp, fabrics }] de la temperatura más alta a la más baja
+export function washRule() {
+  const temps = [...new Set(FABRICS.map((f) => f.washTemp))].sort((a, b) => b - a);
+  return temps.map((temp) => ({ temp, fabrics: FABRICS.filter((f) => f.washTemp === temp) }));
+}
+const fabricNames = (list, markId = null) => joinY(list.map((f) => (f.id === markId ? `<mark class="prela-you">${lowerFirst(f.short)}</mark>` : lowerFirst(f.short))));
+const RULE_TEXT = washRule()
+  .map((r) => `${fabricNames(r.fabrics)} a <b>${r.temp} °C</b>`)
+  .join('; ');
 
 // ---------------------------------------------------------------------------
 // Reglas (exportadas para reutilizar en otros pasos / pruebas)
@@ -117,6 +132,8 @@ export function scorePrewash(fabric, colorHex, choice, { sock = false, sockRemov
 }
 
 export const TINT = '#e8708c';
+// hacia dónde "destiñe" un color oscuro al sol: gris neutro (se aclara y pierde intensidad)
+const FADE_TO = '#9a9690';
 
 // ---------------------------------------------------------------------------
 
@@ -131,7 +148,7 @@ export default {
 <li><b>Revisá el tambor</b> (tocá la puerta para abrirla): si quedó ropa de color, sacala.</li>
 <li><b>Arrastrá la tela</b> doblada hasta la boca del lavarropas (o tocala para cargarla).</li>
 <li>Programá la <b>temperatura</b> con la perilla (<span class="kbd">←</span> <span class="kbd">→</span>) y el <b>centrifugado</b> (<span class="kbd">↑</span> <span class="kbd">↓</span>).</li>
-<li>Regla del oficio: algodón, piqué y lino hasta <b>40 °C</b>; poliéster, modal y mezclas a <b>30 °C</b>. 60 °C o más encoge de más y castiga la fibra.</li>
+<li>Regla del oficio: ${RULE_TEXT}. 60 °C o más encoge de más y castiga la fibra; en agua fría no termina de encoger.</li>
 <li>Centrifugado normal: 800 rpm. Secado ideal: tendido a la sombra (el sol destiñe los oscuros, el secarropas encoge el algodón).</li>
 <li><span class="kbd">Espacio</span> carga la tela o arranca el lavado.</li>
 </ul>`,
@@ -187,7 +204,8 @@ export default {
     const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
     const canvas = engine.canvas;
 
-    function frameView(focus = 'machine') {
+    // Qué parte de la pantalla tapa la interfaz (lo mismo que ui._layout le pasa al motor).
+    function screenLayout() {
       const W = canvas.clientWidth || window.innerWidth;
       const H = canvas.clientHeight || window.innerHeight;
       const mobile = isMobile();
@@ -198,20 +216,97 @@ export default {
         if (mobile) bottom = pEl.classList.contains('collapsed') ? 64 : Math.min(pEl.offsetHeight || H * 0.48, H * 0.48);
         else right = (pEl.offsetWidth || 380) + 24;
       }
-      const top = mobile ? 50 : 58;
-      const hintH = mobile ? 64 : 70; // la indicación de abajo también tapa
-      const fw = W - right - (mobile ? 12 : 40);
-      const fh = H - bottom - top - hintH;
+      return { W, H, mobile, right, bottom };
+    }
+    // Rectángulo del HUD (px del canvas) si está a la vista.
+    function hudRect() {
+      const el = ui.hudEl;
+      if (!el || !el.classList.contains('show') || !el.firstChild) return null;
+      const r = el.getBoundingClientRect();
+      const c = canvas.getBoundingClientRect();
+      if (r.width < 1) return null;
+      return { x0: r.left - c.left, y0: r.top - c.top, x1: r.right - c.left, y1: r.bottom - c.top };
+    }
+    // Cámara de prueba (con el mismo corrimiento del área libre que aplica el motor) para medir
+    // dónde cae algo en pantalla con una vista dada.
+    const probeCam = new THREE.PerspectiveCamera();
+    const probeV = new THREE.Vector3();
+    function projector(view, L) {
+      probeCam.copy(engine.camera, false);
+      probeCam.aspect = L.W / L.H;
+      if (L.right > 0.5 || L.bottom > 0.5) probeCam.setViewOffset(L.W, L.H, L.right / 2, L.bottom / 2, L.W, L.H);
+      else probeCam.clearViewOffset();
+      probeCam.position.fromArray(view.position);
+      probeCam.up.set(0, 1, 0);
+      probeCam.lookAt(probeV.fromArray(view.target));
+      probeCam.updateMatrixWorld(true);
+      probeCam.updateProjectionMatrix();
+      return (x, y, z) => {
+        probeV.set(x, y, z).project(probeCam);
+        return { x: ((probeV.x + 1) / 2) * L.W, y: ((1 - probeV.y) / 2) * L.H };
+      };
+    }
+    // rectángulo en pantalla de la tela colgada (con los broches y la soga)
+    function clothRect(view, L) {
+      const P = projector(view, L);
+      const pts = [];
+      for (const x of [ax - 0.25, ax + 0.25]) for (const y of [scene3.lineY + 0.04, scene3.lineY - 0.3]) for (const z of [scene3.lineZ - 0.03, scene3.lineZ + 0.03]) pts.push(P(x, y, z));
+      return { x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), y1: Math.max(...pts.map((p) => p.y)) };
+    }
+    const overlaps = (a, b, pad = 0) => a.x0 < b.x1 + pad && a.x1 > b.x0 - pad && a.y0 < b.y1 + pad && a.y1 > b.y0 - pad;
+
+    // Encuadra `box` (metros) en la zona R (px) de la pantalla. El motor centra el objetivo de la
+    // cámara en el área libre (sin el panel): la cámara se corre en paralelo a la pantalla (sin
+    // girar) para que el centro de la caja caiga en el centro de R.
+    function fitView(box, R, L) {
       const tan = Math.tan(((engine.camera.fov || 45) * Math.PI) / 360);
-      // caja a encuadrar: lavarropas + tela arriba (+ tendedero al secar)
-      const box = focus === 'line' ? { w: 1.2, h: 1.3, cx: ax + 0.05, cy: 0.76 } : { w: 1.25, h: 1.38, cx: ax + 0.1, cy: 0.64 };
-      const wpp = Math.max(box.w / Math.max(120, fw * 0.92), box.h / Math.max(120, fh * 0.92));
-      const dist = clamp((wpp * H) / (2 * tan), 1.0, 4.5);
-      const shiftY = ((top - hintH) / 2) * ((2 * dist * tan) / H);
-      const target = new THREE.Vector3(box.cx, box.cy + shiftY, front - 0.12);
-      const dir = new THREE.Vector3(0.06, mobile ? 0.36 : 0.42, 1).normalize();
+      const wpp = Math.max(box.w / Math.max(80, (R.x1 - R.x0) * 0.92), box.h / Math.max(80, (R.y1 - R.y0) * 0.92));
+      const dist = clamp((wpp * L.H) / (2 * tan), 1.0, 4.5);
+      const real = (2 * dist * tan) / L.H; // metros por px a la profundidad del objetivo
+      const dir = new THREE.Vector3(0.06, L.mobile ? 0.36 : 0.42, 1).normalize();
+      const target = new THREE.Vector3(box.cx, box.cy, box.cz);
       const position = target.clone().addScaledVector(dir, dist);
-      return { position: position.toArray(), target: target.toArray() };
+      const C = { x: (L.W - L.right) / 2, y: (L.H - L.bottom) / 2 };
+      const S = { x: (R.x0 + R.x1) / 2, y: (R.y0 + R.y1) / 2 };
+      const fwd = dir.clone().negate();
+      const rightV = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+      const upV = new THREE.Vector3().crossVectors(rightV, fwd).normalize();
+      const pan = (dx, dy, k) => {
+        const d = rightV.clone().multiplyScalar(-dx * k).add(upV.clone().multiplyScalar(dy * k));
+        target.add(d);
+        position.add(d);
+      };
+      pan(S.x - C.x, S.y - C.y, real);
+      return { view: { position: position.toArray(), target: target.toArray() }, pan, real, wpp };
+    }
+
+    function frameView(focus = 'machine') {
+      const L = screenLayout();
+      const top = L.mobile ? 50 : 58;
+      // la indicación de abajo también tapa (en el celular, mientras seca, no se muestra)
+      const hintH = L.mobile ? (focus === 'line' ? 14 : 64) : 70;
+      const side = L.mobile ? 6 : 20;
+      const full = { x0: side, x1: L.W - L.right - side, y0: top, y1: L.H - L.bottom - hintH };
+      const front0 = front - 0.12;
+      if (focus !== 'line') return fitView({ w: 1.25, h: 1.38, cx: ax + 0.1, cy: 0.64, cz: front0 }, full, L).view;
+      // secado tendido: lavarropas + tendedero con la tela
+      const wide = fitView({ w: 1.2, h: 1.38, cx: ax + 0.05, cy: 0.83, cz: front0 }, full, L);
+      const hud = hudRect();
+      const pad = 10;
+      if (!hud || !overlaps(clothRect(wide.view, L), hud, pad)) return wide.view;
+      // El HUD taparía la tela (celular, escritorios angostos): se encuadra la tela, la soga, el sol
+      // y la parte de arriba del lavarropas en la zona libre más grande que deja el HUD.
+      const tight = { w: 1.0, h: 0.82, cx: ax, cy: 0.96, cz: (front0 + scene3.lineZ) / 2 };
+      const below = { ...full, y0: Math.max(full.y0, hud.y1 + pad) };
+      const beside = { ...full, x0: Math.max(full.x0, hud.x1 + pad) };
+      const a = fitView(tight, below, L);
+      const b = fitView(tight, beside, L);
+      const pick = a.wpp <= b.wpp ? { f: a, R: below, dirn: 'y' } : { f: b, R: beside, dirn: 'x' };
+      // corrección fina con la proyección real (la tela está más al fondo que el centro de la caja)
+      const cr = clothRect(pick.f.view, L);
+      if (pick.dirn === 'y' && cr.y0 < hud.y1 + pad) pick.f.pan(0, hud.y1 + pad - cr.y0, pick.f.real);
+      if (pick.dirn === 'x' && cr.x0 < hud.x1 + pad) pick.f.pan(hud.x1 + pad - cr.x0, 0, pick.f.real);
+      return pick.f.view;
     }
     let focus = 'machine';
     const fly = (f = focus, d = 1.0) => {
@@ -276,13 +371,16 @@ export default {
       '💡 ¿A qué temperatura? Ver la regla del oficio',
     );
     ruleBox.innerHTML = `<p>Se prelava <b>a la temperatura a la que se va a lavar la remera</b>, así encoge ahora y no después.</p>
-<ul><li><b>Algodón, piqué y lino:</b> hasta 40 °C.</li><li><b>Poliéster, modal y mezclas:</b> 30 °C.</li><li><b>60 °C o más:</b> encoge de más y castiga la fibra.</li><li><b>Fría:</b> cuida, pero no termina de encoger.</li></ul>`;
+<ul>${washRule()
+      .map((r) => `<li><b>A ${r.temp} °C:</b> ${fabricNames(r.fabrics, fab.id)}.</li>`)
+      .join('')}<li><b>60 °C o más:</b> encoge de más y castiga la fibra.</li><li><b>Fría:</b> cuida, pero no termina de encoger.</li></ul>`;
     const skipBtn = h('button', { class: 'btn btn-ghost btn-sm prela-skip', type: 'button', onClick: () => skip() }, 'Saltear el prelavado…');
+    let tempSection = null;
     const controlsEl = h(
       'div',
       { class: 'prela-controls' },
       ui.section('1 · Cargar la tela', loadRow),
-      ui.section('2 · Temperatura', h('div', { class: 'prela-dial-wrap' }, dial.el), tempCap, ruleBtn, ruleBox),
+      (tempSection = ui.section('2 · Temperatura', h('div', { class: 'prela-dial-wrap' }, dial.el), tempCap, ruleBtn, ruleBox)),
       ui.section('3 · Centrifugado', spinRow),
       ui.section('4 · Secado', dryRow),
     );
@@ -299,6 +397,8 @@ export default {
       ],
     });
     ui.panelEl?.classList.add('prela-step');
+    // si quedó un desplazamiento suave del panel en curso, se corta (si no, sigue sobre el panel del paso siguiente)
+    ctx.track(() => ui.bodyEl?.scrollTo({ top: ui.bodyEl.scrollTop, behavior: 'instant' }));
     ctx.track(() => ui.panelEl?.classList.remove('prela-step'));
     const hintIdle = () => ui.hint(isMobile() ? 'Tocá la puerta para revisar el tambor y arrastrá la tela adentro' : 'Tocá la puerta para revisar el tambor · arrastrá la tela hasta la boca del lavarropas (o tocala) · <kbd>Espacio</kbd> carga');
     let hintKey = 'idle';
@@ -324,16 +424,24 @@ export default {
     document.getElementById('app').appendChild(sunEl);
     ctx.track(() => sunEl.remove());
     let sunOn = false;
+    // Etiqueta sobre un punto 3D: no se muestra durante los vuelos de cámara (quedaría flotando
+    // sobre otra cosa) ni si el punto está fuera del área libre de la pantalla.
     const placeLabel = (el, pos, show) => {
-      if (!show) {
+      if (!show || engine.flying) {
         el.style.display = 'none';
         return;
       }
       const sp = engine.worldToScreen(pos);
-      el.style.display = sp.behind ? 'none' : '';
-      const W = canvas.clientWidth || window.innerWidth;
+      const L = screenLayout();
+      const freeW = L.W - L.right;
+      const freeH = L.H - L.bottom;
+      if (sp.behind || sp.x < 0 || sp.x > freeW || sp.y < 30 || sp.y > freeH) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = '';
       const half = (el.offsetWidth || 120) / 2 + 8;
-      el.style.left = `${clamp(sp.x, half, W - half)}px`;
+      el.style.left = `${clamp(sp.x, half, Math.max(half, freeW - half))}px`;
       el.style.top = `${sp.y}px`;
     };
 
@@ -349,6 +457,12 @@ export default {
     let sockSeen = false;
     let autoMode = false;
     let busy = false;
+    let skipping = false; // modal de "saltear" abierto o ya salteado
+    // mientras la tela entra al tambor (o en automático) no se puede saltear: el botón se ve apagado
+    function setBusy(v) {
+      busy = !!v;
+      skipBtn.disabled = busy || autoMode || !(phase === 'load' || phase === 'ready');
+    }
     const bundleTarget = scene3.bundleHome.clone();
 
     function setDoor(open) {
@@ -363,16 +477,26 @@ export default {
         : `<span class="prela-check"></span><span>${sockInside && sockSeen ? '<b>Sacá la media roja</b> y después a' : 'A'}rrastrá la tela doblada hasta la boca del lavarropas.</span>`;
       loadBtn.style.display = loaded ? 'none' : '';
       if (phase === 'load' && !autoMode) {
-        const k = sockInside && doorOpen ? 'sock' : 'idle';
+        // puerta cerrada → revisar; media adentro → sacarla; tambor limpio → cargar la tela
+        const k = !doorOpen ? 'idle' : sockInside ? 'sock' : 'open';
         if (k !== hintKey) {
           hintKey = k;
           if (k === 'sock') ui.hint('🧦 Tocá la <b>media roja</b> para sacarla del tambor… y después cargá la tela');
+          else if (k === 'open') ui.hint(`${sockRemoved ? '¡Tambor limpio!' : 'Tambor vacío, todo en orden.'} Ahora arrastrá la tela hasta el <b>aro verde</b> de la boca${isMobile() ? ' (o tocala)' : ' (o tocala · <kbd>Espacio</kbd>)'}`);
           else hintIdle();
         }
       }
       // temperatura
       const t = sel.temp;
-      const capTxt = t === 0 ? 'Agua fría: la más suave, pero encoge poco.' : t === 30 ? 'Tibia suave: sintéticos, modal y mezclas.' : t === 40 ? 'Tibia: el lavado de todos los días del algodón.' : t === 60 ? 'Caliente: solo para blancos de algodón muy resistentes.' : 'Muy caliente: hierve la fibra. ¡Cuidado!';
+      const fits = FABRICS.filter((f) => f.washTemp === t);
+      const capTxt =
+        t === 0
+          ? 'Agua fría: la más suave, pero la fibra no termina de encoger.'
+          : fits.length
+            ? `${t <= 30 ? 'Tibia suave' : 'Tibia'}: lo justo para ${fabricNames(fits)}.`
+            : t >= 90
+              ? 'Muy caliente: hierve la fibra. ¡Cuidado!'
+              : 'Caliente: encoge de más. Solo para blancos de algodón muy resistentes.';
       tempCap.innerHTML = `<b>${tempLabel(t)}</b> · ${capTxt}`;
       tempCap.className = `prela-temp-cap t${t}`;
       for (const b of spinRow.children) {
@@ -386,7 +510,7 @@ export default {
         b.setAttribute('aria-checked', on ? 'true' : 'false');
       }
       if (phase === 'load' || phase === 'ready') {
-        wm.setDisplay(`${t === 0 ? 'FRIA' : `${t}°C`} ${sel.spin}\n${loaded ? 'LISTO' : 'CARGAR'}`);
+        wm.setDisplay(`${t === 0 ? 'FRÍA' : `${t}°C`} ${sel.spin}\n${loaded ? 'LISTO' : 'CARGAR'}`);
         ui.updateAction('start', { label: '▶ Iniciar lavado', disabled: !loaded });
       }
     }
@@ -396,15 +520,17 @@ export default {
       const a = document.activeElement;
       if (a && a !== document.body && ui.panelEl?.contains(a) && a.tagName === 'BUTTON') a.blur();
     };
+    // el programa se puede tocar hasta que arranca el lavado (también mientras la tela entra al tambor)
+    const canProgram = () => (phase === 'load' || phase === 'ready') && !skipping;
     function setSpin(rpm) {
-      if (busy) return;
+      if (!canProgram()) return;
       blurPanel();
       sel.spin = rpm;
       audio.play('select');
       refresh();
     }
     function setDry(id) {
-      if (busy) return;
+      if (!canProgram()) return;
       blurPanel();
       sel.dry = id;
       audio.play('select');
@@ -420,7 +546,7 @@ export default {
 
     function loadIntoDrum() {
       if (loaded) return;
-      busy = true;
+      setBusy(true);
       if (!doorOpen) setDoor(true);
       drag = null;
       canvas.style.cursor = '';
@@ -443,9 +569,15 @@ export default {
               ctx.timeout(() => {
                 setDoor(false);
                 audio.play('press');
-                busy = false;
+                setBusy(false);
                 refresh();
                 if (!autoMode) {
+                  // en el celular el panel es chico: se lleva a la vista la perilla de temperatura
+                  if (isMobile() && tempSection && ui.bodyEl) {
+                    const br = ui.bodyEl.getBoundingClientRect();
+                    const er = tempSection.getBoundingClientRect();
+                    ui.bodyEl.scrollTo({ top: Math.max(0, ui.bodyEl.scrollTop + er.top - br.top - 6), behavior: 'smooth' });
+                  }
                   ui.hint('¡Adentro! Ahora programá <b>temperatura</b>, <b>centrifugado</b> y <b>secado</b> en el panel y tocá <b>Iniciar lavado</b>');
                   ctx.timeout(() => phase === 'ready' && ui.hint(null), 7000);
                 }
@@ -575,13 +707,11 @@ export default {
     ctx.listen(window, 'keydown', (e) => {
       if (e.defaultPrevented || document.querySelector('.modal-wrap')) return;
       if (e.target && e.target.closest && e.target.closest('input, textarea, select')) return;
-      if (busy && phase !== 'load' && phase !== 'ready') return;
+      if (!canProgram()) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        if (busy) return;
         e.preventDefault();
         dial.step(e.key === 'ArrowRight' ? 1 : -1);
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (busy) return;
         e.preventDefault();
         const i = PREWASH.spin.indexOf(sel.spin);
         const j = clamp(i + (e.key === 'ArrowUp' ? 1 : -1), 0, PREWASH.spin.length - 1);
@@ -594,12 +724,13 @@ export default {
       }
     });
 
-    let layoutMobile = isMobile();
+    // al cambiar el tamaño de la ventana se vuelve a encuadrar (el HUD y el panel cambian de lugar)
+    let resizeT = 0;
     ctx.listen(window, 'resize', () => {
-      const mob = isMobile();
-      if (mob !== layoutMobile) fly(focus, 0.6);
-      layoutMobile = mob;
+      clearTimeout(resizeT);
+      resizeT = setTimeout(() => ctx.alive && fly(focus, 0.5), 160);
     });
+    ctx.track(() => clearTimeout(resizeT));
 
     // ---------- ciclo de lavado ----------
     const PHASES = [
@@ -621,8 +752,10 @@ export default {
       const big = h('div', { class: 'hud-big prela-hud-time' }, '0:58');
       const meter = ui.meter({ label: '', value: 0 });
       const prog = h('div', { class: 'prela-hud-prog' }, `${fab.short} · ${tempLabel(sel.temp)} · ${sel.spin} rpm`);
-      ui.hud(h('div', { class: 'prela-hud' }, h('div', { class: 'hud-title' }, '🫧 Lavarropas'), prog, big, meter, list));
-      hudRefs = { list, big, meter };
+      const title = h('div', { class: 'hud-title' }, '🫧 Lavarropas');
+      const root = h('div', { class: 'prela-hud' }, title, prog, big, meter, list);
+      ui.hud(root);
+      hudRefs = { root, title, list, big, meter };
     }
     function hudStep(i, timeTxt, progress) {
       if (!hudRefs) return;
@@ -635,8 +768,8 @@ export default {
 
     function startWash(auto) {
       if (phase !== 'ready' || busy || !loaded) return;
-      busy = true;
       phase = 'wash';
+      setBusy(true);
       controlsEl.classList.add('is-busy');
       dial.setDisabled(true);
       skipBtn.disabled = true;
@@ -648,9 +781,40 @@ export default {
       rumble = audio.loop('rumble');
       // la media (si quedó) ya está mezclada con la carga
       if (scene3.sock) scene3.sock.visible = false;
-      wash = { t: 0, speed: auto ? 2.6 : 1, tinted: false, lastWater: -1, splash: new Set() };
+      wash = { t: 0, speed: auto ? 4 : 1, tinted: false, lastWater: -1, splash: new Set() };
       buildHud();
+      showWashTips();
       audio.play('press');
+    }
+
+    // ---------- "Mientras lava…": datos del oficio que rotan en el panel ----------
+    const WASH_TIPS = [
+      fab.shrink <= 0.015
+        ? `<b>¿Y ${FIBER_WORD[fab.id] || 'esta tela'}?</b> Casi no encoge (${pctTxt(fab.shrink)}), pero igual se prelava: le saca el apresto y estabiliza el tejido.`
+        : `<b>¿Por qué encoge?</b> En la fábrica los hilos se tejen estirados; con el agua las fibras se relajan y ${FIBER_WORD[fab.id] || 'la tela'} se acorta, sobre todo a lo largo.`,
+      '<b>Chau apresto:</b> el prelavado saca el almidón de fábrica, y así tintas, vinilos y bordados agarran mejor.',
+      '<b>Siempre solita:</b> la tela nueva se lava sin otras prendas: no destiñe sobre nada ni junta pelusas.',
+      '<b>Ojo con el centrifugado:</b> a muchas vueltas quedan quiebres marcados que después cuestan horrores de planchar.',
+    ];
+    let tipHead = null;
+    function showWashTips() {
+      let i = 0;
+      const txt = h('p', { class: 'prela-tip-text', html: WASH_TIPS[0] });
+      const dots = h('div', { class: 'prela-tip-dots' }, ...WASH_TIPS.map((_, k) => h('i', { class: k === 0 ? 'on' : '' })));
+      const head = h('span', {}, 'Mientras lava…');
+      tipHead = head;
+      const card = h('div', { class: 'prela-tip' }, h('div', { class: 'prela-tip-head' }, h('span', { class: 'prela-tip-ico', 'aria-hidden': 'true' }, '🫧'), head), txt, dots);
+      controlsEl.parentNode.insertBefore(card, controlsEl);
+      if (ui.bodyEl) ui.bodyEl.scrollTo({ top: 0, behavior: 'smooth' });
+      ctx.interval(() => {
+        if (phase === 'done') return;
+        i = (i + 1) % WASH_TIPS.length;
+        txt.classList.remove('in');
+        void txt.offsetWidth;
+        txt.innerHTML = WASH_TIPS[i];
+        txt.classList.add('in');
+        [...dots.children].forEach((d, k) => d.classList.toggle('on', k === i));
+      }, autoMode ? 1800 : 3200);
     }
 
     function waterTo(level) {
@@ -725,14 +889,19 @@ export default {
     let fadeHex = null; // el sol destiñe los colores oscuros
     function startDry() {
       phase = 'dry';
+      ui.updateAction('start', { label: 'Secando…' });
+      if (tipHead) tipHead.textContent = 'Mientras seca…';
       const auto = autoMode;
-      const speed = auto ? 2.4 : 1;
+      const speed = auto ? 3.5 : 1;
       if (sockInside && luminance(color0) > 0.45) {
         tintHex = mixHex(color0, TINT, 0.24);
         scene3.setTint(tintHex);
       }
       scene3.setWet(1);
-      if (sel.dry === 'sol' && luminance(color0) < 0.35) fadeHex = mixHex(color0, '#b9b2a6', 0.16);
+      // el sol destiñe los oscuros: se ven apenas más claros y grisáceos (no de otro color)
+      if (sel.dry === 'sol' && luminance(color0) < 0.35) fadeHex = mixHex(color0, FADE_TO, 0.14);
+      const dOpt = DRY_OPTIONS.find((d) => d.id === sel.dry);
+      if (hudRefs) hudRefs.title.textContent = `${dOpt.icon} ${dOpt.name}`;
       if (sel.dry === 'secarropas') {
         dry = { t: 0, dur: 3.4 / speed, mode: 'secarropas' };
         rumble.set(0.3, 210);
@@ -740,6 +909,9 @@ export default {
         ui.hint(auto ? null : 'Secarropas: aire caliente y vueltas…');
         return;
       }
+      // tendido: en pantallas chicas el HUD se achica (solo el avance) para dejar ver la tela colgada
+      const L = screenLayout();
+      if (hudRefs && (L.mobile || L.W - L.right < 820)) hudRefs.root.classList.add('compact');
       // tendido: abrir, sacar la tela mojada y colgarla en la soga
       setDoor(true);
       audio.play('click');
@@ -775,7 +947,7 @@ export default {
         });
       }, 450 / speed);
       fly('line', 1.0 / speed);
-      ui.hint(auto ? null : sel.dry === 'sol' ? 'Al sol: seca rápido… ¿y el color?' : 'A la sombra: despacito y sin castigar la tela');
+      ui.hint(auto || L.mobile ? null : sel.dry === 'sol' ? 'Al sol: seca rápido… ¿y el color?' : 'A la sombra: despacito y sin castigar la tela');
     }
 
     function updateDry(rdt) {
@@ -789,8 +961,9 @@ export default {
         scene3.setWet(1 - easeInOutCubic(k));
         scene3.setDrip(7 * (1 - k) * (1 - k));
         if (fadeHex) scene3.setFade(mixHex(tintHex || color0, fadeHex, smoothstep(0.2, 1, k)));
-        hudStep(3, `${Math.round(k * 100)} %`, 0.75 + k * 0.25);
-        if (hudRefs) hudRefs.big.textContent = k < 1 ? `Secando ${Math.round(k * 100)} %` : 'Seca ✓';
+        // el HUD compacto (solo "Secando…") muestra el avance del secado; el completo, el del ciclo entero
+        const compact = !!hudRefs?.root.classList.contains('compact');
+        hudStep(3, k < 1 ? `Secando ${Math.round(k * 100)}\u202f%` : 'Seca ✓', compact ? k : 0.75 + k * 0.25);
       }
       if (k >= 1) {
         const mode = dry.mode;
@@ -829,13 +1002,13 @@ export default {
         state.fabric.colorId = null;
       }
       // al sol, un color oscuro queda apenas desteñido (sigue siendo el mismo color de catálogo)
-      if (fadeHex) state.fabric.color = mixHex(state.fabric.color, '#b9b2a6', 0.1);
+      if (fadeHex) state.fabric.color = mixHex(state.fabric.color, FADE_TO, 0.1);
       state.prewash = { done: true, skipped: false, temp: sel.temp, spin: sel.spin, dry: sel.dry, wrinkleBoost: r.wrinkleBoost, residualShrink: r.residualShrink, stained: !!r.tinted };
       // cuánto encogió el corte de tela
       const meters = fabricEstimate(createPattern({ ...state.pattern }));
       const shrinkNow = fab.shrink * (1 - r.residualShrink) * (sel.temp - fab.washTemp >= 20 ? 1.35 : 1);
-      r.notes.push(`📏 El corte encogió <b>${pctTxt(shrinkNow)}</b>: de ${mTxt(meters)} m a ${mTxt(meters * (1 - shrinkNow))} m de largo. Mejor ahora que en la remera terminada.`);
-      if (r.wrinkleBoost > 0) r.notes.push('👕 Sale más arrugada de lo normal: en el planchado vas a tener más trabajo.');
+      r.notes.push(`${ICO('📏')}El corte encogió <b>${pctTxt(shrinkNow)}</b>: de ${mTxt(meters)} m a ${mTxt(meters * (1 - shrinkNow))} m de largo. Mejor ahora que en la remera terminada.`);
+      if (r.wrinkleBoost > 0) r.notes.push(`${ICO('👕')}Sale más arrugada de lo normal: en el planchado vas a tener más trabajo.`);
       hudStep(4, '✓', 1);
       if (hudRefs) hudRefs.big.textContent = '¡Listo!';
       audio.play('good');
@@ -849,6 +1022,7 @@ export default {
     function runAuto() {
       if (busy || phase === 'wash' || phase === 'dry' || phase === 'done') return;
       autoMode = true;
+      setBusy(busy);
       ui.enableAction('auto', false);
       sel.temp = ideal.temp;
       sel.spin = ideal.spin;
@@ -883,26 +1057,61 @@ export default {
           { id: 'wash', label: 'Mejor la lavo', kind: 'primary' },
         ],
       });
-      if (id !== 'skip' || !ctx.alive || busy) return;
-      busy = true;
+      if (id !== 'skip' || !ctx.alive || busy || phase === 'wash' || phase === 'dry' || phase === 'done') return;
+      skipping = true;
       phase = 'done';
+      setBusy(true);
       state.prewash = { done: false, skipped: true, temp: null, spin: null, dry: null, wrinkleBoost: 0, residualShrink: 1 };
       ctx.removeCost('Prelavado');
       audio.play('bad');
       const notes = [
         `${NO} <b>Salteaste el prelavado:</b> en la prueba de lavado la remera va a encoger cerca de ${pct} (y puede quedar torcida).`,
-        'El prelavado también saca el <b>apresto</b> de fábrica: sin eso, tintas y vinilos agarran mejor.',
-        fab.shrink <= 0.015 ? `${MID} ${fab.short} casi no encoge, pero igual conviene lavarla una vez antes de estampar.` : `Para ${FIBER_WORD[fab.id] || 'esta tela'} lo ideal era lavarla a <b>${fab.washTemp} °C</b> y tenderla a la sombra.`,
+        `${MID} Como no la lavaste, el <b>apresto</b> de fábrica sigue ahí: tintas y vinilos van a agarrar peor.`,
+        fab.shrink <= 0.015 ? `${MID} ${fab.short} casi no encoge, pero igual conviene lavarla una vez antes de estampar.` : `${ICO('💡')}Para ${FIBER_WORD[fab.id] || 'esta tela'} lo ideal era lavarla a <b>${fab.washTemp} °C</b> y tenderla a la sombra.`,
       ];
       await ctx.complete({ score: 30, notes });
     }
 
+    // ---------- ayudas para las pruebas automáticas (window.__taller.step._test) ----------
+    let testSpeed = 1;
+    const screenOf = (obj) => {
+      if (!obj) return null;
+      obj.getWorldPosition(tmpV);
+      const sp = engine.worldToScreen(tmpV);
+      return [Math.round(sp.x), Math.round(sp.y)];
+    };
+    ctx.step._test = {
+      get phase() {
+        return phase;
+      },
+      get sel() {
+        return { ...sel };
+      },
+      get sockInside() {
+        return sockInside;
+      },
+      get doorOpen() {
+        return doorOpen;
+      },
+      get busy() {
+        return busy;
+      },
+      // avance del secado 0..1 (null si no está secando)
+      get dryK() {
+        return dry ? clamp(dry.t / dry.dur) : null;
+      },
+      screen: () => ({ bundle: screenOf(scene3.bundle), sock: scene3.sock?.visible ? screenOf(scene3.sock) : null, door: screenOf({ getWorldPosition: (v) => v.copy(wm.doorCenter) }), mouth: screenOf({ getWorldPosition: (v) => v.copy(mouth) }) }),
+      fast: (k = 6) => (testSpeed = k),
+    };
+    ctx.track(() => delete ctx.step._test);
+
     // ---------- loop ----------
     let last = performance.now();
+    let ringGlow = false;
     ctx.onUpdate((dt, t) => {
       // tiempo real (el dt del motor se recorta y en equipos lentos el ciclo duraría minutos)
       const now = performance.now();
-      const rdt = Math.min(0.5, (now - last) / 1000);
+      const rdt = Math.min(0.5, (now - last) / 1000) * testSpeed;
       last = now;
       // tela siguiendo al puntero / animaciones de vuelo
       const b = scene3.bundle;
@@ -927,6 +1136,16 @@ export default {
         b.scale.setScalar(sc);
         scene3.setRing(near < 0.2 ? 0.95 : 0.45 + Math.sin(now / 160) * 0.12);
         scene3.ring.scale.setScalar(near < 0.2 ? 1.04 : 1);
+      }
+      // con la puerta abierta y el tambor limpio, el aro de la boca late suave: "acá va la tela"
+      const dragging = !!(drag && drag.started);
+      if (phase === 'load' && !busy && doorOpen && !sockInside && !bundleAnim && !dragging && b.visible) {
+        scene3.setRing(0.22 + Math.sin(now / 260) * 0.1);
+        scene3.ring.scale.setScalar(1);
+        ringGlow = true;
+      } else if (ringGlow && !dragging) {
+        scene3.setRing(0);
+        ringGlow = false;
       }
       // media volando al canasto
       if (sockAnim) {

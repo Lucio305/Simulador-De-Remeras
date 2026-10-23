@@ -6,7 +6,7 @@
 import * as catalog from '../data/catalog.js';
 import { createPattern } from '../shirt/pattern.js';
 import { autoLayout } from './shared/fabricLayout.js';
-import { renderSheet, stampSheet, silhouetteIcon } from './molde/sheet.js';
+import { renderSheet, stampSheet, silhouetteIcon, outlinesBox } from './molde/sheet.js';
 import { createTape } from './molde/tape.js';
 import { clamp, money, easeOutBack, easeInOutCubic } from '../core/utils.js';
 
@@ -15,6 +15,9 @@ const { SIZES, FITS, SLEEVES, NECKS, fabricById, sizeById, fitById, sleeveById, 
 const OK = '<span class="molde-mark ok">✓</span> ';
 const NO = '<span class="molde-mark no">✗</span> ';
 const MID = '<span class="molde-mark mid">≈</span> ';
+// nota informativa con ícono en el lugar de la marca (la lista del informe queda pareja)
+const ICO = (e) => `<span class="molde-mark ico" aria-hidden="true">${e}</span> `;
+const TIP_ICO = { info: '💡', warn: '⚠️', good: '👍' };
 const DEFAULT = { size: 'M', fit: 'regular', sleeve: 'corta', neck: 'redondo' };
 const KEYS = ['size', 'fit', 'sleeve', 'neck'];
 const cmTxt = (v) => String(Math.round(v * 10) / 10).replace('.', ',');
@@ -75,8 +78,9 @@ export function patternTips(pattern, fabric) {
   const tips = [];
   const ease = easeOf(pattern);
   tips.push({ type: 'info', html: `Este molde tiene <b>${ease >= 0 ? '+' : ''}${ease} cm de holgura</b> en el contorno de pecho: le queda bien a alguien de unos <b>${bodyChest(p.size)} cm</b> de pecho.` });
-  if (!fabric.knit && p.fit === 'slim') tips.push({ type: 'warn', html: `<b>${fabric.short} + entallada:</b> es tejido plano y no estira, así que te va a tirar en hombros y sisas. Con lino conviene clásica u oversize.` });
-  else if (fabric.stretch < 0.35 && p.fit === 'slim') tips.push({ type: 'warn', html: `<b>${fabric.short} + entallada:</b> estira poco y queda dura sobre el cuerpo. Una clásica le va mejor.` });
+  // (key 'fitWarn': el puntaje ya lo explica con su descuento, no se repite en las notas)
+  if (!fabric.knit && p.fit === 'slim') tips.push({ type: 'warn', key: 'fitWarn', html: `<b>${fabric.short} + entallada:</b> es tejido plano y no estira, así que te va a tirar en hombros y sisas. Con lino conviene clásica u oversize.` });
+  else if (fabric.stretch < 0.35 && p.fit === 'slim') tips.push({ type: 'warn', key: 'fitWarn', html: `<b>${fabric.short} + entallada:</b> estira poco y queda dura sobre el cuerpo. Una clásica le va mejor.` });
   else if (fabric.id === 'poliester' && p.fit === 'slim') tips.push({ type: 'good', html: '<b>Dry-fit entallada:</b> el calce deportivo de manual; el poliéster estira y seca rápido.' });
   else if (fabric.id === 'modal' && p.fit === 'oversize') tips.push({ type: 'good', html: '<b>Modal oversize:</b> la caída fluida del modal hace lucir el corte holgado.' });
   else if (fabric.id === 'lino' && p.fit !== 'slim') tips.push({ type: 'good', html: '<b>Lino con holgura:</b> fresco y relajado. El lino necesita aire porque no estira.' });
@@ -108,22 +112,26 @@ export function scorePattern(state, { auto = false } = {}) {
     }
   } else {
     score = 90;
-    notes.push(state.order ? `${state.order.name} dejó el molde a gusto del taller: elegiste ${label.size(p.size)}, ${label.fit(p.fit)}, ${label.sleeve(p.sleeve)} y ${label.neck(p.neck)}.` : 'En taller libre no hay molde "incorrecto": lo importante es que el calce acompañe a la tela y al uso.');
+    notes.push(state.order ? `${ICO('📋')}${state.order.name} dejó el molde a gusto del taller: elegiste ${label.size(p.size)}, ${label.fit(p.fit)}, ${label.sleeve(p.sleeve)} y ${label.neck(p.neck)}.` : `${ICO('📐')}En taller libre no hay molde "incorrecto": lo importante es que el calce acompañe a la tela y al uso.`);
   }
+  let fitPenalty = false;
   if (!fab.knit && p.fit === 'slim') {
     score -= 10;
+    fitPenalty = true;
     notes.push(`${MID} <b>${fab.short} + entallada:</b> el tejido plano no estira y la remera va a tirar en hombros y sisas. Conviene clásica (−10).`);
   } else if (fab.stretch < 0.35 && p.fit === 'slim') {
     score -= 5;
+    fitPenalty = true;
     notes.push(`${MID} <b>${fab.short} + entallada:</b> estira poco; una clásica le queda más cómoda (−5).`);
   }
   if (auto) {
     score = Math.min(score, 72);
     notes.unshift(`${MID} Molde elegido en automático por el taller: la próxima elegilo vos y sumá más puntos.`);
   }
-  for (const t of patternTips(pattern, fab).slice(0, 3)) notes.push(t.html);
+  const tips = patternTips(pattern, fab).filter((t) => !(fitPenalty && t.key === 'fitWarn'));
+  for (const t of tips.slice(0, 3)) notes.push(`${ICO(TIP_ICO[t.type] || '💡')}${t.html}`);
   const meters = fabricEstimate(pattern);
-  notes.push(`Consumo estimado de tela: <b>${mTxt(meters)} m</b> (ancho 1,20 m). El largo exacto sale del tizado.`);
+  notes.push(`${ICO('🧵')}Consumo estimado de tela: <b>${mTxt(meters)} m</b> (ancho 1,20 m). El largo exacto sale del tizado.`);
   return { score: clamp(score, 0, 100), notes };
 }
 
@@ -224,8 +232,19 @@ export default {
     // ---------- panel ----------
     const icons = (() => {
       const make = (opts, crop) => silhouetteIcon(createPattern({ ...DEFAULT, ...opts }).silhouette.front.outline, { crop, size: 40 });
+      // calce: las tres siluetas a la MISMA escala y con la diferencia exagerada (entallada con
+      // cintura marcada, oversize más ancha y de hombro caído); si no, a 40 px se ven iguales
+      const fitOutline = (id) => {
+        const out = createPattern({ ...DEFAULT, fit: id }).silhouette.front.outline;
+        const waist = (y) => Math.exp(-(((y + 0.43) / 0.14) ** 2));
+        if (id === 'slim') return out.map((p) => ({ x: p.x * (0.9 - 0.12 * waist(p.y)), y: p.y }));
+        if (id === 'oversize') return out.map((p) => ({ x: p.x * 1.1, y: p.y * 1.03 - (Math.abs(p.x) > 0.17 && p.y > -0.2 ? 0.02 : 0) }));
+        return out;
+      };
+      const fitOutlines = Object.fromEntries(FITS.map((f) => [f.id, fitOutline(f.id)]));
+      const fitFrame = outlinesBox(Object.values(fitOutlines));
       return {
-        fit: Object.fromEntries(FITS.map((f) => [f.id, () => make({ fit: f.id })])),
+        fit: Object.fromEntries(FITS.map((f) => [f.id, () => silhouetteIcon(fitOutlines[f.id], { frame: fitFrame, size: 40 })])),
         sleeve: Object.fromEntries(SLEEVES.map((s) => [s.id, () => make({ sleeve: s.id })])),
         neck: Object.fromEntries(NECKS.map((n) => [n.id, () => make({ neck: n.id }, { minY: -0.3, minX: -0.32, maxX: 0.32 })])),
       };
@@ -284,6 +303,55 @@ export default {
     );
     const fabricEl = h('div', { class: 'molde-fabric' });
     const tipsEl = h('div', { class: 'molde-tips' });
+    // aviso flotante "Ver la moldería" mientras la hoja de moldes quede fuera de la vista del panel
+    // (se desplaza solo el cuerpo del panel: scrollIntoView podría mover también la página)
+    const scrollToSheet = (smooth = true) => {
+      const body = ui.bodyEl;
+      if (!body) return;
+      const br = body.getBoundingClientRect();
+      const er = sheetWrap.getBoundingClientRect();
+      const top = body.scrollTop + er.top - br.top - Math.max(8, (br.height - er.height) / 2);
+      body.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' });
+    };
+    const peek = h(
+      'button',
+      {
+        class: 'molde-peek',
+        type: 'button',
+        onClick: () => {
+          audio.play('select');
+          scrollToSheet();
+        },
+      },
+      h('span', { class: 'molde-peek-ico', 'aria-hidden': 'true' }, '📐'),
+      h('span', {}, 'Ver la moldería'),
+      h('b', { class: 'molde-peek-arrow', 'aria-hidden': 'true' }, '↓'),
+    );
+    const peekWrap = h('div', { class: 'molde-peek-wrap hide' }, peek);
+    let sheetSeen = false;
+    if (typeof IntersectionObserver === 'function') {
+      const io = new IntersectionObserver(
+        (entries) => {
+          for (const en of entries) {
+            // "vista" = al menos 40 % de la hoja adentro del panel (una franjita no alcanza)
+            sheetSeen = en.isIntersecting && en.intersectionRatio >= 0.4;
+            peekWrap.classList.toggle('hide', sheetSeen);
+            // la flecha apunta hacia donde quedó la hoja (arriba si ya se pasó de largo)
+            const above = en.rootBounds && en.boundingClientRect.top < en.rootBounds.top;
+            peek.querySelector('.molde-peek-arrow').textContent = above ? '↑' : '↓';
+          }
+        },
+        { root: ui.bodyEl || null, threshold: [0, 0.2, 0.4, 0.6, 1] },
+      );
+      io.observe(sheetWrap);
+      ctx.track(() => io.disconnect());
+    }
+    const pulsePeek = () => {
+      if (sheetSeen) return;
+      peek.classList.remove('pulse');
+      void peek.offsetWidth;
+      peek.classList.add('pulse');
+    };
 
     let orderEl = null;
     const orderItems = [];
@@ -314,6 +382,7 @@ export default {
       ui.section('Moldería', sheetWrap, sheetCap, legend, fabricEl),
       ui.section('Medidas de la prenda terminada', measuresEl, tapeToggle),
       tipsEl,
+      peekWrap,
     );
 
     ui.panel({
@@ -328,6 +397,8 @@ export default {
       ],
     });
     ui.panelEl?.classList.add('molde-step');
+    // si quedó un desplazamiento suave del panel en curso, se corta (si no, sigue sobre el panel del paso siguiente)
+    ctx.track(() => ui.bodyEl?.scrollTo({ top: ui.bodyEl.scrollTop, behavior: 'instant' }));
     ctx.track(() => ui.panelEl?.classList.remove('molde-step'));
     ui.hint(isMobile() ? 'Tocá las opciones del panel · deslizá la remera para girarla' : 'Elegí en el panel · <kbd>←</kbd> <kbd>→</kbd> cambian de talle · arrastrá la remera para girarla');
     ctx.timeout(() => ui.hint(null), 9000);
@@ -405,12 +476,24 @@ export default {
       }
     }
 
+    let bigModal = null;
+    // si se sale del paso con la moldería grande abierta, se cierra (con su propio botón: así suelta su listener)
+    const closeBigSheet = () => {
+      if (!bigModal || !bigModal.isConnected) return;
+      const btn = bigModal.querySelector('.modal-foot .btn');
+      if (btn) btn.click();
+      else bigModal.remove();
+      bigModal = null;
+    };
+    ctx.track(closeBigSheet);
     function openBigSheet() {
-      if (busy) return;
+      if (busy || (bigModal && bigModal.isConnected)) return;
       const pattern = createPattern({ ...sel });
       const r = renderSheet(pattern, { sizeLabel: sel.size, fitLabel: fitById(sel.fit).name, animate: true });
       const cap = h('div', { class: 'molde-sheet-cap' }, 'Pasá el mouse por un molde para ver sus medidas');
-      const wrap = h('div', { class: 'molde-modal-sheet' }, h('div', { class: 'molde-sheet-wrap' }, r.svg), cap, legend.cloneNode(true));
+      // la hoja entra entera en la pantalla (manga larga = hoja alta): el ancho sale de la altura disponible
+      r.svg.style.width = `min(100%, calc((100vh - 260px) * ${(r.width / r.height).toFixed(4)}))`;
+      const wrap = h('div', { class: 'molde-modal-sheet' }, h('div', { class: 'molde-sheet-big' }, r.svg), cap, legend.cloneNode(true));
       bindSheetHover(r, cap);
       audio.play('select');
       ui.modal({
@@ -418,7 +501,8 @@ export default {
         body: wrap,
         wide: true,
         actions: [{ id: 'ok', label: 'Cerrar', kind: 'primary' }],
-      });
+      }).then(() => (bigModal = null));
+      bigModal = wrap.closest('.modal-wrap');
     }
 
     function apply3D() {
@@ -436,6 +520,7 @@ export default {
       audio.play('select');
       refreshPanel(true);
       dirty3D = true;
+      pulsePeek();
     }
 
     // ---------- interacción 3D: girar la remera ----------
@@ -529,6 +614,7 @@ export default {
         audio.play('select');
       }
       busy = true;
+      closeBigSheet();
       ui.enableAction('ok', false);
       ui.enableAction('auto', false);
       ui.hint(null);
@@ -537,10 +623,15 @@ export default {
       const meters = fabricEstimate(pattern);
       ctx.addCost('Tela', Math.round(meters * fab.pricePerMeter));
       const { score, notes } = scorePattern(state, { auto });
-      // sello sobre la moldería + vuelta completa de la remera
-      if (sheet) stampSheet(sheet.svg, `MOLDE OK · T. ${sel.size}`);
-      audio.play('press');
-      ctx.timeout(() => audio.play('snip'), 380);
+      // sello sobre la moldería (se lleva la hoja a la vista para verlo) + vuelta completa de la remera
+      const needScroll = !sheetSeen;
+      if (needScroll) scrollToSheet();
+      const stampDelay = needScroll ? 450 : 0;
+      ctx.timeout(() => {
+        if (sheet) stampSheet(sheet.svg, `MOLDE OK · T. ${sel.size}`);
+        audio.play('press');
+      }, stampDelay);
+      ctx.timeout(() => audio.play('snip'), stampDelay + 380);
       spin = { t: 0 };
       tape.setVisible(false);
       const txt = `📐 Talle ${sel.size} · ${fitById(sel.fit).name} · ${sleeveById(sel.sleeve).name} · ${neckById(sel.neck).name}`;
@@ -549,7 +640,7 @@ export default {
         const bad = notes.filter((n) => n.startsWith(NO)).length;
         if (bad) ui.toast(`📋 Ojo: el molde no cumple ${bad === 1 ? 'un requisito' : `${bad} requisitos`} del pedido de ${order.name}.`, 'bad', 4400);
       }
-      await new Promise((r) => ctx.timeout(r, 1300));
+      await new Promise((r) => ctx.timeout(r, 1300 + stampDelay));
       if (!ctx.alive) return;
       await ctx.complete({ score, notes, silent: true });
     }

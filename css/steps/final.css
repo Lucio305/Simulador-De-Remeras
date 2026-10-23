@@ -816,7 +816,7 @@
 /* ---------- Barra de vista sobre la escena ---------- */
 .fin-viewbar {
   position: absolute;
-  left: calc((100% - 476px) / 2);
+  left: var(--fin-vb-x, calc((100% - 476px) / 2));
   bottom: 22px;
   transition: bottom 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.25s;
   transform: translateX(-50%);
@@ -1018,4 +1018,11 @@
     font-size: 13.5px;
     padding: 10px 6px;
   }
+}
+
+.col-confirm {
+  margin: 0;
+  max-width: 34em;
+  line-height: 1.5;
+  color: var(--ink-2);
 }

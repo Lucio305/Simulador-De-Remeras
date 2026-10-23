@@ -102,6 +102,10 @@ const SFX = {
     [523, 659, 784, 1046].forEach((f, i) => tone(f, { type: 'triangle', d: 0.3, vol: 0.16, delay: i * 0.11 }));
   },
   tick: () => tone(1500, { type: 'square', d: 0.02, vol: 0.04 }),
+  beep: () => {
+    tone(1320, { type: 'square', d: 0.09, vol: 0.07 });
+    tone(1320, { type: 'square', d: 0.09, vol: 0.07, delay: 0.16 });
+  },
   splash: () => burst({ freq: 700, q: 0.5, a: 0.02, d: 0.5, vol: 0.25, type: 'lowpass' }),
   camera: () => {
     burst({ freq: 2500, q: 1, d: 0.04, vol: 0.3 });

@@ -31,21 +31,40 @@ function round3(v) {
   return Math.round(v * 1000) / 1000;
 }
 
+// Largo de tela a comprar (al milímetro, igual que el que queda guardado en state.layout)
 export function fabricLengthOf(usedLength) {
-  return Math.min(L, usedLength + PIECE_GAP);
+  return Math.round(Math.min(L, usedLength + PIECE_GAP) * 1000) / 1000;
 }
 
-// Rango de aprovechamiento contra el que se puntúa: 0.45 → 40 pts … 0.8 → 100 para un molde que
-// permite llegar a 0.8; si la mejor distribución conocida no llega, la escala se achica en proporción.
+// Rango de aprovechamiento del molde (0,45 … 0,8 si el molde permite llegar a 0,8; si la mejor
+// distribución conocida no llega, se achica en proporción). Lo usan la nota del acomodo
+// automático (65–75) y la meta del HUD; el acomodo a mano se puntúa con efficiencyPoints.
 export function efficiencyScale(refEff) {
   const hi = clamp(refEff || 0.8, 0.42, 0.8);
   return { lo: hi * 0.5625, hi };
 }
 
+// Puntos por aprovechamiento según qué tan cerca se queda de la mejor distribución conocida
+// (r = eficiencia / referencia). Con referencia 0,8 equivale a la regla 0,45 → ~40 … 0,8 → 100,
+// pero más exigente arriba: cada centímetro de tela de más se nota.
+const EFF_CURVE = [
+  [0, 0],
+  [0.6, 40],
+  [0.85, 72],
+  [0.95, 88],
+  [0.995, 100],
+];
 export function efficiencyPoints(eff, refEff) {
-  const { lo, hi } = efficiencyScale(refEff);
-  if (eff < lo) return 40 * clamp(eff / lo);
-  return 40 + 60 * clamp((eff - lo) / (hi - lo));
+  const r = eff / Math.max(0.3, refEff || 0.75);
+  if (r >= EFF_CURVE[EFF_CURVE.length - 1][0]) return 100;
+  for (let i = 1; i < EFF_CURVE.length; i++) {
+    const [r1, p1] = EFF_CURVE[i];
+    if (r <= r1) {
+      const [r0, p0] = EFF_CURVE[i - 1];
+      return p0 + ((p1 - p0) * (r - r0)) / (r1 - r0);
+    }
+  }
+  return 100;
 }
 
 export function scoreLayout(res, ctxInfo) {
@@ -55,16 +74,17 @@ export function scoreLayout(res, ctxInfo) {
   const refEff = ref?.efficiency || 0.75;
   const { lo, hi } = efficiencyScale(refEff);
   let score;
+  const pct = (v) => Math.round(v * 100);
   if (auto) {
     score = 65 + 10 * clamp((efficiency - lo) / (hi - lo));
-    const canBeat = autoRef && refEff > autoRef.efficiency + 0.005;
+    const canBeat = autoRef && pct(refEff) > pct(autoRef.efficiency);
     notes.push(
       `🤖 Acomodo automático: aprovechó el <b>${pctTxt(efficiency)}</b> de la tela. ${canBeat ? `Acomodando a mano se puede encastrar mejor (la mejor distribución que conocemos llega al ${pctTxt(refEff)}).` : 'Para este molde casi no queda margen, pero el oficio está en mirar cada hueco con tus propios ojos.'}`,
     );
   } else {
     score = efficiencyPoints(efficiency, refEff);
-    const vsRef = efficiency >= refEff - 0.004 ? ' ¡Igual o mejor que la mejor distribución que conocemos!' : ` (la mejor que conocemos llega al ${pctTxt(refEff)}).`;
-    notes.push(`🧩 Aprovechaste el <b>${pctTxt(efficiency)}</b> de la tela${vsRef.startsWith(' ¡') ? '.' : ''}${vsRef}`);
+    const best = pct(efficiency) >= pct(refEff);
+    notes.push(`🧩 Aprovechaste el <b>${pctTxt(efficiency)}</b> de la tela${best ? '. ¡Igual o mejor que la mejor distribución que conocemos!' : ` (la mejor que conocemos llega al ${pctTxt(refEff)}).`}`);
   }
   const price = fabric.pricePerMeter;
   notes.push(`📏 Usaste <b>${mTxt(fabricLength)} m</b> de ${fabric.short} (${Math.round(W * 100)} cm de ancho): <b>${money(Math.round(fabricLength * price))}</b>.`);
@@ -72,16 +92,22 @@ export function scoreLayout(res, ctxInfo) {
   if (!auto && autoRef) {
     const saved = autoRef.fabricLength - fabricLength;
     if (saved > 0.005) {
-      const bonus = Math.min(8, (saved / 0.15) * 8);
+      const bonus = Math.min(5, (saved / 0.1) * 5);
       score += bonus;
-      notes.push(`✂️ Le ganaste al acomodo por columnas: ahorraste <b>${cmTxt(saved)} cm</b> de tela (${money(Math.round(saved * price))}) (+${Math.round(bonus)}).`);
+      notes.push(`✂️ Le ganaste al acomodo por columnas: ahorraste <b>${cmTxt(saved)} cm</b> de tela (${money(Math.round(saved * price))})${Math.round(bonus) >= 1 ? ` (+${Math.round(bonus)})` : ''}.`);
+    } else if (saved < -0.015) {
+      const body = pattern.pieces.find((p) => p.id === 'frente');
+      const stack = body && 2 * body.width + 3 * PIECE_GAP <= W;
+      notes.push(
+        `📐 El acomodo por columnas usa ${mTxt(autoRef.fabricLength)} m: gastaste <b>${cmTxt(-saved)} cm de más</b> (${money(Math.round(-saved * price))}). ${stack ? 'Frente y espalda contra los orillos, una al lado de la otra a lo ancho' : 'Frente y espalda pegadas, una detrás de la otra'}, y las piezas chicas en los huecos de escote y sisa.`,
+      );
     }
   }
   // acomodo automático sin mejorar: vale como el botón "Hacerlo automático"
   const untouchedAuto = !auto && usedAuto && autoRef && efficiency <= autoRef.efficiency + 0.005;
   if (untouchedAuto) {
     score = Math.min(score, 65 + 10 * clamp((efficiency - lo) / (hi - lo)));
-    notes.push('🤖 Tizaste el acomodo automático tal cual, sin mejorarlo (nota de acomodo automático). Probá meter el cuello y las mangas en los huecos que dejan el escote y las sisas.');
+    notes.push('🤖 Tizaste el acomodo automático tal cual, sin mejorarlo (nota de acomodo automático). Probá correr las piezas contra el borde de la tela y meter las chicas en los huecos que dejan el escote y las sisas.');
   }
   // hilo
   if (grainWrong.length) {
@@ -90,7 +116,7 @@ export function scoreLayout(res, ctxInfo) {
     score -= per * grainWrong.length;
     const names = grainWrong.map(pieceName).join(', ');
     notes.push(
-      `🧭 <b>${grainWrong.length === 1 ? 'Una pieza' : `${grainWrong.length} piezas`} con el hilo cruzado</b> (${names}) (−${per * grainWrong.length}). ${
+      `🧭 <b>${grainWrong.length === 1 ? 'Una pieza' : `${grainWrong.length} piezas`} con el hilo cruzado</b>: ${names} (−${per * grainWrong.length}). ${
         fabric.knit ? 'En el tejido de punto la pieza estira para el lado equivocado: la remera se deforma y se "revira" (se tuerce la costura del costado) después del lavado.' : 'En tejido plano, fuera del hilo la pieza se estira y cae torcida.'
       }${forced ? ' Con este molde no entraba de otra forma en tela de 1,20 m: para un talle así conviene comprar tela más ancha.' : ''}`,
     );
@@ -111,12 +137,27 @@ export function scoreLayout(res, ctxInfo) {
   return { score: Math.round(clamp(score, 0, 100)), notes };
 }
 
+// Se guarda redondeado al milímetro, salvo que el redondeo haga que dos moldes pegados se pisen
+// (corte vuelve a validar la distribución y, si no pasa, la reemplazaría por la automática).
+function storablePlacements(pattern, placements) {
+  const valid = (pls) => {
+    const ev = evaluateLayout(pattern, pls);
+    return !ev.overlaps.length && !ev.outside.length;
+  };
+  const rounded = placements.map((p) => ({ id: p.id, x: round3(p.x), z: round3(p.z), rot: normRot(p.rot) }));
+  if (valid(rounded)) return rounded;
+  const exact = placements.map((p) => ({ id: p.id, x: p.x, z: p.z, rot: normRot(p.rot) }));
+  if (valid(exact)) return exact;
+  const raw = placements.map((p) => ({ id: p.id, x: p.x, z: p.z, rot: p.rot }));
+  return valid(raw) ? raw : rounded;
+}
+
 function storeLayout(state, pattern, placements) {
   const ev = evaluateLayout(pattern, placements);
   const grainWrong = placements.filter((p) => !isGrainOk(p.rot)).map((p) => p.id);
   state.layout = {
-    placements: placements.map((p) => ({ id: p.id, x: round3(p.x), z: round3(p.z), rot: normRot(p.rot) })),
-    fabricLength: round3(fabricLengthOf(ev.usedLength)),
+    placements: storablePlacements(pattern, placements),
+    fabricLength: fabricLengthOf(ev.usedLength),
     efficiency: Math.round(ev.efficiency * 1000) / 1000,
     grainOk: grainWrong.length === 0,
     grainWrong,
@@ -142,7 +183,8 @@ export default {
 <li><b>Hilo:</b> girá los moldes hasta que la <b>flecha de hilo</b> quede <b>paralela al orillo</b> (se pone verde). <span class="tiz-kbd">R</span>, la rueda del mouse, clic derecho o doble toque giran 90°.</li>
 <li><b>Sin pisarse:</b> si dos moldes se superponen o uno sale de la tela, se marcan en rojo. Al soltar, el imán los acomoda unos milímetros (mantené <span class="tiz-kbd">Alt</span> para soltarlos libres).</li>
 <li><b>Ahorro:</b> cuanto menos largo de tela uses, mejor. Encastrá las piezas chicas en los huecos.</li>
-<li>Flechas: mover fino · <span class="tiz-kbd">Supr</span>: devolver a la bandeja · <span class="tiz-kbd">Tab</span>: siguiente molde · <span class="tiz-kbd">Enter</span>: tizar.</li>
+<li>Con un molde elegido: flechas para moverlo fino · <span class="tiz-kbd">Supr</span>: devolver a la bandeja · <span class="tiz-kbd">Tab</span>: siguiente molde. <span class="tiz-kbd">Enter</span>: tizar. Sin mouse: <span class="tiz-kbd">Tab</span> hasta una tarjeta del panel y <span class="tiz-kbd">Enter</span> la pone en la tela.</li>
+<li><b>Tizar:</b> la tiza recorre cada contorno y deja la línea que después vas a seguir con la tijera. Un clic, un toque o <span class="tiz-kbd">Espacio</span> la aceleran.</li>
 </ul>`,
 
   defaults(state, ctx) {
@@ -164,13 +206,29 @@ export default {
     const ref = referenceLayout(pattern) || safeAutoLayout(pattern);
     const autoRef = safeAutoLayout(pattern);
     const selvedgeForced = !!ref && [...analyze(pieceMap, ref.placements).flags.values()].some((f) => f.selvedge);
-    const { hi: targetEff } = efficiencyScale(ref?.efficiency);
+    // la meta del HUD es la mejor distribución conocida, sin tope: es contra la que se puntúa (efficiencyPoints)
+    const targetEff = ref?.efficiency > 0 ? Math.round(ref.efficiency * 1000) / 1000 : efficiencyScale().hi;
+    // récord personal por molde (comodidad de este navegador; si no hay storage, no pasa nada)
+    const bestKey = `taller:tizado:mejor:${pattern.key}`;
+    let personalBest = null;
+    try {
+      const v = parseFloat(localStorage.getItem(bestKey));
+      if (Number.isFinite(v) && v > 0 && v <= 1) personalBest = v;
+    } catch (e) {
+      personalBest = null;
+    }
     const o = fabricOrigin();
     const canvas = engine.canvas;
     const panelEl = document.getElementById('panel');
     const appEl = document.getElementById('app');
-    const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
+    const mobileMq = window.matchMedia('(max-width: 820px)');
+    const isMobile = () => mobileMq.matches;
     const modalOpen = () => !!document.querySelector('.modal-wrap');
+    // ¿el foco está en un control de la interfaz? (ahí Enter, Tab y las flechas hacen lo suyo)
+    const focusInUi = () => {
+      const a = document.activeElement;
+      return !!a && a !== document.body && a !== canvas && !!a.closest?.('button, a[href], input, select, textarea, summary, [contenteditable="true"]');
+    };
 
     // ---------------- escena ----------------
     const table = createTableScene({ fabric, color: state.fabric.color, heather: state.fabric.heather, sizeLabel: pattern.opts.size });
@@ -208,12 +266,25 @@ export default {
       chalk.scale.copy(chalkRest.scale);
       chalk.visible = chalkRest.visible;
     });
+    // mientras tiza, la tiza toma el color de la línea que deja (celeste pálido no se ve sobre tela clara)
+    const chalkMeshes = [];
+    chalk?.traverse((m) => m.isMesh && chalkMeshes.push({ mesh: m, material: m.material }));
+    const tracingMat = new THREE.MeshStandardMaterial({ color: table.chalkHex, roughness: 0.9, metalness: 0, emissive: table.chalkHex, emissiveIntensity: 0.12 });
+    const setChalkLook = (tracing) => {
+      for (const c of chalkMeshes) c.mesh.material = tracing ? tracingMat : c.material;
+    };
+    ctx.track(() => {
+      setChalkLook(false);
+      tracingMat.dispose();
+    });
     ctx.track(() => (canvas.style.cursor = ''));
     panelEl.classList.add('tiz-mode');
     ctx.track(() => panelEl.classList.remove('tiz-mode'));
 
     // ---------------- estado del juego ----------------
-    let phase = 'layout'; // 'layout' | 'chalk' | 'done'
+    let phase = 'layout'; // 'layout' | 'arranging' (Hacerlo automático) | 'chalk' | 'done'
+    let arranging = false; // moldes volando hacia un acomodo automático: todavía no se puede tizar
+    let confirming = false; // diálogo "¿Tizar con el hilo cruzado?" abierto
     let selected = null;
     let hover = null;
     let drag = null;
@@ -226,6 +297,10 @@ export default {
     let wheelT = 0;
     let grainToastShown = false;
     let lastValid = false;
+    let timeScale = 1; // solo para pruebas automáticas (_test.speed)
+    let pauseAt = null; // solo para pruebas automáticas (_test.pauseAt)
+    let chalkK = 1; // escala de la tiza mientras tiza
+    let chalkSize = 0; // tamaño visible de la tiza (m) para su sombra; 0 = sin sombra
     const anims = [];
 
     const placedItems = () => order.filter((it) => it.placed);
@@ -267,24 +342,33 @@ export default {
       { class: 'tiz-hud' },
       h('div', { class: 'hud-title' }, '🖍️ Tizado'),
       h('div', { class: 'tiz-hud-main' }, h('span', { class: 'hud-big tiz-hud-eff' }, '—'), h('span', { class: 'tiz-hud-cap' }, h('span', {}, 'de la tela'), ' ', h('span', {}, 'aprovechada'))),
-      h('div', { class: 'tiz-hud-meter', title: 'La marca es la meta: la mejor distribución que conocemos para este molde' }, h('i', { class: 'tiz-hud-fill' }), h('b', { class: 'tiz-hud-goal', style: { left: `${Math.round(targetEff * 100)}%` } }, h('span', {}, `meta ${pctTxt(targetEff)}`))),
+      h(
+        'div',
+        { class: 'tiz-hud-meter', title: `La marca negra es la meta: la mejor distribución que conocemos para este molde${personalBest ? `. La dorada, tu récord (${pctTxt(personalBest)})` : ''}` },
+        h('i', { class: 'tiz-hud-fill' }),
+        personalBest ? h('b', { class: 'tiz-hud-best', style: { left: `${Math.round(personalBest * 100)}%` } }) : null,
+        h('b', { class: `tiz-hud-goal${personalBest ? (targetEff > 0.6 ? ' r' : ' l') : ''}`, style: { left: `${Math.round(targetEff * 100)}%` } }, h('span', {}, `meta ${pctTxt(targetEff)}${personalBest ? ` · récord ${pctTxt(personalBest)}` : ''}`)),
+      ),
       h('div', { class: 'tiz-hud-line tiz-hud-len' }),
       h('div', { class: 'tiz-hud-line tiz-hud-count' }),
       h('div', { class: 'tiz-hud-status' }),
     );
     ui.hud(hudEl);
     const q = (sel) => hudEl.querySelector(sel);
-    let hudBox = null;
-    let hudBoxT = 0;
-    const hudRect = () => {
+    // rectángulos de la UI compartida (HUD, indicación) para que las etiquetas no se les encimen
+    const rectCache = new Map();
+    const cachedRect = (id) => {
       const now = performance.now();
-      if (!hudBox || now - hudBoxT > 500) {
-        const hu = document.getElementById('hud');
-        hudBox = hu && hu.classList.contains('show') ? hu.getBoundingClientRect() : null;
-        hudBoxT = now;
+      let c = rectCache.get(id);
+      if (!c || now - c.t > 400) {
+        const e = document.getElementById(id);
+        c = { t: now, r: e && e.classList.contains('show') ? e.getBoundingClientRect() : null };
+        rectCache.set(id, c);
       }
-      return hudBox;
+      return c.r;
     };
+    const hudRect = () => cachedRect('hud');
+    const hintRect = () => cachedRect('hint');
 
     // ---------------- Panel ----------------
     const cards = new Map();
@@ -300,7 +384,12 @@ export default {
       card.addEventListener('pointerdown', (e) => {
         if (phase !== 'layout' || e.button === 2) return;
         e.preventDefault();
-        pendingCard = { id: it.id, sx: e.clientX, sy: e.clientY };
+        pendingCard = { id: it.id, sx: e.clientX, sy: e.clientY, touch: e.pointerType !== 'mouse' };
+      });
+      // con el teclado (Tab hasta la tarjeta + Enter/Espacio) el molde cae en un lugar libre
+      card.addEventListener('click', (e) => {
+        if (e.detail !== 0 || phase !== 'layout' || card.disabled) return;
+        trayTap(it.id);
       });
       card.addEventListener('contextmenu', (e) => e.preventDefault());
       cards.set(it.id, { card, chip });
@@ -503,7 +592,8 @@ export default {
       if (full && allPlaced) evalCache = evaluateLayout(pattern, pls);
       else if (!allPlaced) evalCache = null;
       const evalBad = evalCache && (evalCache.overlaps.length || evalCache.outside.length);
-      const valid = allPlaced && !anyBad && !evalBad && phase === 'layout';
+      // con los moldes todavía volando hacia un acomodo automático (o el diálogo abierto) no se tiza
+      const valid = allPlaced && !anyBad && !evalBad && phase === 'layout' && !arranging && !confirming;
       ui.enableAction('tizar', valid);
       if (valid && !lastValid && full) audio.play('pop');
       lastValid = valid;
@@ -516,25 +606,45 @@ export default {
 
     function updateHud(allPlaced, valid) {
       const pls = placements();
-      const eff = pls.length ? an.efficiency : 0;
-      q('.tiz-hud-eff').textContent = pctTxt(eff);
-      q('.tiz-hud-fill').style.width = `${Math.round(clamp(eff) * 100)}%`;
-      q('.tiz-hud-fill').classList.toggle('good', eff >= targetEff - 0.02);
+      const bad = [...an.flags.entries()].filter(([, f]) => f.overlap || f.outside);
+      // El aprovechamiento solo vale con todos los moldes en la tela: con algunos en la bandeja
+      // el número da alto y después baja al sumar piezas. Con moldes en rojo se muestra en gris.
+      const measurable = allPlaced && pls.length > 0;
+      const eff = measurable ? an.efficiency : 0;
+      const effEl = q('.tiz-hud-eff');
+      effEl.textContent = measurable ? pctTxt(eff) : '—';
+      effEl.classList.toggle('dim', !measurable || bad.length > 0);
+      const fill = q('.tiz-hud-fill');
+      fill.style.width = `${Math.round(clamp(eff) * 100)}%`;
+      fill.classList.toggle('good', measurable && !bad.length && eff >= targetEff - 0.02);
+      fill.classList.toggle('dim', bad.length > 0);
+      const left = order.length - pls.length;
+      const cap = q('.tiz-hud-cap');
+      const capTxt = measurable ? 'de la tela|aprovechada' : pls.length ? `se mide con|todos los moldes` : 'de la tela|aprovechada';
+      if (cap.dataset.t !== capTxt) {
+        cap.dataset.t = capTxt;
+        const [a, b] = capTxt.split('|');
+        cap.innerHTML = '';
+        cap.append(h('span', {}, a), ' ', h('span', {}, b));
+        cap.classList.toggle('todo', !measurable && pls.length > 0);
+      }
       const len = pls.length && an.usedLength > 0 ? fabricLengthOf(an.usedLength) : 0;
       q('.tiz-hud-len').innerHTML = len ? `📏 <b>${mTxt(len)} m</b> de tela · ${money(Math.round(len * fabric.pricePerMeter))}` : '📏 Todavía no hay moldes en la tela';
       const nOk = pls.filter((p) => isGrainOk(p.rot)).length;
       q('.tiz-hud-count').innerHTML = `🧩 ${pls.length}/${order.length} moldes · 🧭 hilo ${nOk}/${pls.length || 0}`;
       const st = q('.tiz-hud-status');
-      const bad = [...an.flags.entries()].filter(([, f]) => f.overlap || f.outside);
-      if (bad.length) {
+      if (arranging) {
+        st.className = 'tiz-hud-status';
+        st.textContent = '🧩 Acomodando los moldes…';
+      } else if (bad.length) {
         st.className = 'tiz-hud-status bad';
         st.textContent = `⚠ ${bad.some(([, f]) => f.outside) ? 'Hay moldes fuera de la tela' : 'Hay moldes que se pisan'}`;
       } else if (valid) {
         st.className = 'tiz-hud-status good';
         st.textContent = nOk === pls.length ? '✓ Listo para tizar' : '✓ Se puede tizar (ojo con el hilo)';
       } else if (!allPlaced) {
-        st.className = 'tiz-hud-status';
-        st.textContent = `Faltan ${order.length - pls.length} ${order.length - pls.length === 1 ? 'molde' : 'moldes'} en la bandeja`;
+        st.className = 'tiz-hud-status todo';
+        st.textContent = `Faltan ${left} ${left === 1 ? 'molde' : 'moldes'} en la bandeja`;
       } else {
         st.className = 'tiz-hud-status';
         st.textContent = '';
@@ -570,6 +680,7 @@ export default {
       }
     }
 
+    let issuesKey = '';
     function updateIssues(allPlaced, valid) {
       const pls = placements();
       const list = [];
@@ -579,23 +690,37 @@ export default {
       const wrong = pls.filter((p) => !isGrainOk(p.rot));
       if (wrong.length) list.push(['warn', `Hilo cruzado en <b>${wrong.map((p) => pieceName(p.id)).join(', ')}</b>: giralos 90° (flecha roja → verde).`]);
       const onSel = [...an.flags.entries()].filter(([, f]) => f.selvedge && !f.outside).map(([id]) => pieceName(id));
-      if (onSel.length) list.push(['warn', `<b>${onSel.join(', ')}</b> ${onSel.length === 1 ? 'pisa' : 'pisan'} el orillo: corrélo(s) 1–2 cm hacia adentro.`]);
+      if (onSel.length) list.push(['warn', `<b>${onSel.join(', ')}</b> ${onSel.length === 1 ? 'pisa el orillo: correlo' : 'pisan el orillo: correlos'} 1–2 cm hacia adentro.`]);
+      const head = valid && !wrong.length && !onSel.length ? 'good' : valid ? 'warn' : '';
+      const key = JSON.stringify([head, head === 'good' ? pctTxt(an.efficiency) : '', list.slice(0, 5)]);
+      if (key === issuesKey) return; // sin cambios: no rehacer el DOM en cada movimiento del mouse
+      issuesKey = key;
       issuesEl.innerHTML = '';
-      if (valid && !wrong.length && !onSel.length) issuesEl.appendChild(ui.note(`✓ <b>Todo en su lugar.</b> Aprovechás el ${pctTxt(an.efficiency)} de la tela. ¿Podés encastrar más? Si no, ¡a tizar!`, 'good'));
-      else if (valid) issuesEl.appendChild(ui.note('Se puede tizar, pero hay detalles que te van a restar puntos:', 'warn'));
+      if (head === 'good') issuesEl.appendChild(ui.note(`✓ <b>Todo en su lugar.</b> Aprovechás el ${pctTxt(an.efficiency)} de la tela. ¿Podés encastrar más? Si no, ¡a tizar!`, 'good'));
+      else if (head === 'warn') issuesEl.appendChild(ui.note('Se puede tizar, pero hay detalles que te van a restar puntos:', 'warn'));
       for (const [type, html] of list.slice(0, 5)) issuesEl.appendChild(h('div', { class: `tiz-issue ${type}`, html }));
     }
 
+    let lastHint = null;
+    const setHint = (txt) => {
+      if (txt === lastHint) return;
+      lastHint = txt;
+      ui.hint(txt);
+    };
     function updateHint(allPlaced, valid) {
+      if (arranging) {
+        setHint(isMobile() ? '🧩 Acomodando los moldes…' : '🧩 Acomodando los moldes por columnas…');
+        return;
+      }
       if (phase !== 'layout') return;
       const pls = placements();
       const m = isMobile();
-      if (drag) ui.hint(m ? 'Soltalo sobre la tela' : 'Soltá sobre la tela · <kbd>R</kbd> o la rueda giran 90° · <kbd>Alt</kbd> suelta sin imán');
-      else if (!pls.length) ui.hint(m ? '👇 Arrastrá un molde hasta la tela' : '👉 Arrastrá un molde desde el panel hasta la tela');
-      else if (pls.some((p) => !isGrainOk(p.rot))) ui.hint(m ? 'Doble toque o <b>⟳</b>: flecha paralela al orillo ⟷' : 'Girá con <kbd>R</kbd>, la rueda o clic derecho: la flecha tiene que quedar <b>paralela al orillo</b> ⟷');
-      else if (!allPlaced) ui.hint(m ? 'Seguí con los moldes de la bandeja' : 'Seguí con los moldes de la bandeja · las piezas chicas entran en los huecos');
-      else if (!valid) ui.hint(m ? 'Separá los moldes en rojo' : 'Hay moldes en rojo: separalos o metelos adentro de la tela');
-      else ui.hint(m ? '¡Listo! Tocá <b>🖍️ Tizar</b>' : '¡Listo! Encastrá un poco más o tocá <b>🖍️ Tizar</b> para marcar los contornos');
+      if (drag) setHint(m ? 'Soltalo sobre la tela' : 'Soltá sobre la tela · <kbd>R</kbd> o la rueda giran 90° · <kbd>Alt</kbd> suelta sin imán');
+      else if (!pls.length) setHint(m ? '👇 Arrastrá un molde hasta la tela' : '👉 Arrastrá un molde desde el panel hasta la tela');
+      else if (pls.some((p) => !isGrainOk(p.rot))) setHint(m ? 'Doble toque o <b>⟳</b>: flecha paralela al orillo ⟷' : 'Girá con <kbd>R</kbd>, la rueda o clic derecho: la flecha tiene que quedar <b>paralela al orillo</b> ⟷');
+      else if (!allPlaced) setHint(m ? 'Seguí con los moldes de la bandeja' : 'Seguí con los moldes de la bandeja · las piezas chicas entran en los huecos');
+      else if (!valid) setHint(m ? 'Separá los moldes en rojo' : 'Hay moldes en rojo: separalos o metelos adentro de la tela');
+      else setHint(m ? '¡Listo! Tocá <b>🖍️ Tizar</b>' : '¡Listo! Encastrá un poco más o tocá <b>🖍️ Tizar</b> para marcar los contornos');
     }
 
     // tilde verde que sube y se desvanece sobre un molde que quedó bien ubicado
@@ -718,6 +843,25 @@ export default {
       return { x: clamp(L - 0.25, -lb.minX, L - lb.maxX), z: W / 2 };
     }
 
+    // Toque (o Enter) sobre una tarjeta de la bandeja: si el molde no está en la tela, cae en el
+    // primer lugar libre; si ya está, se elige.
+    function trayTap(id) {
+      const it = items.get(id);
+      if (!it || phase !== 'layout') return;
+      if (!it.placed) {
+        const s = autoSpot(id);
+        placeFromTray(id, s.x, s.z, { tweenFrom: { x: L + 0.35, z: s.z, lift: 0.06 } });
+        selected = id;
+        audio.play('cut');
+        refresh(true);
+      } else {
+        selected = id;
+        bringToTop(id);
+        refreshStates();
+        updateCards();
+      }
+    }
+
     function nudge(dx, dz) {
       if (!selected) return;
       const it = items.get(selected);
@@ -765,7 +909,15 @@ export default {
     ctx.onPointer('move', (e) => {
       if (phase !== 'layout') return;
       if (pendingCard && !drag) {
-        if (Math.hypot(e.clientX - pendingCard.sx, e.clientY - pendingCard.sy) > 7) {
+        const dx = e.clientX - pendingCard.sx;
+        const dy = e.clientY - pendingCard.sy;
+        // En el celular la bandeja es una fila que se desliza de costado: un gesto horizontal (o
+        // hacia abajo) es para recorrerla. Solo un gesto hacia arriba, hacia la tela, saca el molde.
+        if (Math.hypot(dx, dy) > 7 && pendingCard.touch && isMobile() && !(-dy > Math.abs(dx) * 0.8)) {
+          pendingCard = null;
+          return;
+        }
+        if (Math.hypot(dx, dy) > 7) {
           const id = pendingCard.id;
           pendingCard = null;
           const it = items.get(id);
@@ -792,6 +944,7 @@ export default {
         it.pl.x = it.vis.x = c.x;
         it.pl.z = it.vis.z = c.z;
         const inPanel = drag.fromTray && overPanel(e);
+        drag.overPanel = inPanel;
         ghost.classList.toggle('show', inPanel);
         if (inPanel) {
           ghost.style.left = `${e.clientX}px`;
@@ -824,19 +977,7 @@ export default {
       if (pendingCard) {
         const id = pendingCard.id;
         pendingCard = null;
-        const it = items.get(id);
-        if (!it.placed) {
-          const s = autoSpot(id);
-          placeFromTray(id, s.x, s.z, { tweenFrom: { x: L + 0.35, z: s.z, lift: 0.06 } });
-          selected = id;
-          audio.play('cut');
-          refresh(true);
-        } else {
-          selected = id;
-          bringToTop(id);
-          refreshStates();
-          updateCards();
-        }
+        trayTap(id);
         return;
       }
       if (!drag) return;
@@ -866,6 +1007,24 @@ export default {
       refresh(true);
     });
 
+    // el navegador se quedó con el gesto (p. ej. deslizar la bandeja en el celular)
+    // Un molde recién sacado de la bandeja vuelve a ella salvo que ya esté sobre la tela.
+    ctx.listen(window, 'pointercancel', () => {
+      pendingCard = null;
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      ghost.classList.remove('show');
+      canvas.style.cursor = '';
+      if (phase !== 'layout') return;
+      const fl = an?.flags.get(d.id);
+      if (d.fromTray && (!fl || fl.outside || d.overPanel)) returnToTray(d.id);
+      else {
+        if (d.moved) settleItem(d.id);
+        refresh(true);
+      }
+    });
+
     ctx.onPointer('wheel', (e) => {
       if (phase !== 'layout') return;
       const id = drag?.id || hover;
@@ -892,39 +1051,50 @@ export default {
       const k = e.key;
       const step = e.shiftKey ? 0.02 : 0.005;
       const target = drag?.id || hover || selected;
+      // Solo se toman las teclas de navegación cuando hay un molde elegido: si no, Tab recorre los
+      // botones del panel y las flechas lo desplazan como siempre.
+      const sel = selected && items.get(selected)?.placed ? selected : null;
+      const arrows = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
       if (k === 'r' || k === 'R' || k === 'e' || k === 'E') {
-        if (target) rotateItem(target, e.shiftKey ? -1 : 1);
-        e.preventDefault();
+        if (target) {
+          rotateItem(target, e.shiftKey ? -1 : 1);
+          e.preventDefault();
+        }
       } else if (k === 'q' || k === 'Q') {
         if (target) rotateItem(target, -1);
-      } else if (k === 'ArrowLeft') {
-        nudge(-step, 0);
-        e.preventDefault();
-      } else if (k === 'ArrowRight') {
-        nudge(step, 0);
-        e.preventDefault();
-      } else if (k === 'ArrowUp') {
-        nudge(0, -step);
-        e.preventDefault();
-      } else if (k === 'ArrowDown') {
-        nudge(0, step);
-        e.preventDefault();
-      } else if (k === 'Delete' || k === 'Backspace') {
-        if (selected) returnToTray(selected);
-        e.preventDefault();
-      } else if (k === 'Tab') {
-        const pl = placedItems();
-        if (pl.length) {
-          const i = pl.findIndex((x) => x.id === selected);
-          const nx = pl[(i + (e.shiftKey ? pl.length - 1 : 1)) % pl.length] || pl[0];
-          select(nx.id);
-          bringToTop(nx.id);
+      } else if (arrows[k]) {
+        if (sel) {
+          nudge(...arrows[k]);
+          e.preventDefault();
         }
-        e.preventDefault();
+      } else if (k === 'Delete' || k === 'Backspace') {
+        if (sel) {
+          returnToTray(sel);
+          e.preventDefault();
+        }
+      } else if (k === 'Tab') {
+        // con un molde elegido (y el foco fuera del panel), Tab pasa al siguiente; después del
+        // último suelta la selección y el foco sigue su camino normal
+        const pl = placedItems();
+        if (sel && !focusInUi() && pl.length > 1) {
+          const i = pl.findIndex((x) => x.id === sel);
+          const j = i + (e.shiftKey ? -1 : 1);
+          if (j < 0 || j >= pl.length) select(null);
+          else {
+            select(pl[j].id);
+            bringToTop(pl[j].id);
+            e.preventDefault();
+          }
+        }
       } else if (k === 'Escape') {
         select(null);
       } else if (k === 'Enter') {
-        if (!ui.action('tizar')?.disabled) tizar(false);
+        // en un botón enfocado, Enter es su clic (no un segundo "Tizar")
+        if (e.repeat || focusInUi()) return;
+        if (!ui.action('tizar')?.disabled) {
+          e.preventDefault();
+          tizar(false);
+        }
       }
     });
 
@@ -937,7 +1107,13 @@ export default {
     const worldOf = (x, z, dy = 0) => new THREE.Vector3(o.x0 + x, table.topWorldY + dy, o.z0 + z);
     const tmpV = new THREE.Vector3();
 
-    ctx.onUpdate((dt, t) => {
+    // espera a que terminen las animaciones de los moldes (por cuadros, no por reloj: en un equipo
+    // lento los tweens van más despacio y no hay que tizar con los moldes todavía en el aire)
+    const settleWaiters = [];
+    const whenSettled = () => new Promise((resolve) => settleWaiters.push(resolve));
+
+    ctx.onUpdate((dt0, t) => {
+      const dt = dt0 * timeScale;
       const sdt = dt * speedMul;
       for (let i = anims.length - 1; i >= 0; i--) {
         const a = anims[i];
@@ -959,6 +1135,10 @@ export default {
           const tw = it.tween;
           if (tw.delay > 0) tw.delay -= dt;
           else {
+            if (tw.sound) {
+              tw.sound = false;
+              audio.play('cut');
+            }
             tw.t += dt;
             const k = Math.min(1, tw.t / tw.dur);
             const e = easeInOutCubic(k);
@@ -986,7 +1166,11 @@ export default {
         if (it.lifting) it.obj.setOpacity(v.opacity);
       }
       table.tick(dt, t);
+      const cf = chalk && chalkSize > 0 ? worldToFabric(chalk.position.x, chalk.position.z) : null;
+      if (cf && cf.x > -0.02 && cf.x < L + 0.02 && cf.z > -0.02 && cf.z < W + 0.02) table.setChalkShadow(cf.x, cf.z, chalk.position.y - table.topWorldY, chalkSize);
+      else table.setChalkShadow(null);
       positionLabels();
+      if (settleWaiters.length && order.every((it) => !it.tween)) for (const r of settleWaiters.splice(0)) r();
     });
 
     const projV = new THREE.Vector3();
@@ -1001,14 +1185,82 @@ export default {
       return { x: (projV.x * 0.5 + 0.5) * cw, y: (-projV.y * 0.5 + 0.5) * chh, behind: projV.z > 1 };
     };
     function positionLabels() {
-      const r = { left: 0, top: 0 };
+      const hudR = hudRect();
+      const avoid = [hintRect()].filter(Boolean);
+      // barra flotante del molde elegido (primero: las etiquetas se corren de ella)
+      const it = selected ? items.get(selected) : null;
+      if (it && it.placed && phase === 'layout' && !drag) {
+        const b = localBounds(it.piece, it.pl.rot);
+        const pTop = toScreen(it.vis.x, it.vis.z + b.minZ, 0.01);
+        const nm = floatEl.querySelector('.tiz-float-name');
+        const wasShown = floatEl.classList.contains('show');
+        floatEl.classList.add('show');
+        if (nm.textContent !== it.piece.name || !wasShown || !floatEl._w) {
+          nm.textContent = it.piece.name;
+          floatEl._w = floatEl.offsetWidth || 150;
+          floatEl._h = floatEl.offsetHeight || 40;
+        }
+        const fw = floatEl._w;
+        const fh = floatEl._h;
+        if (isMobile()) {
+          // En el celular la tela mide unos pocos centímetros de pantalla: una barra encima del
+          // molde taparía a los vecinos. Queda fija arriba a la derecha, en la franja libre que
+          // hay entre la barra superior y la tela (al lado del HUD).
+          if (!floatEl.classList.contains('docked') || floatEl._dockName !== it.piece.name) {
+            floatEl.classList.add('docked');
+            floatEl.classList.remove('below');
+            floatEl._dockName = it.piece.name;
+            floatEl._dw = floatEl.offsetWidth || 110;
+            floatEl._dh = floatEl.offsetHeight || 64;
+          }
+          const top = hudR ? hudR.top : insets.top + 8;
+          floatEl.style.transform = `translate(${Math.round(cw - 8)}px, ${Math.round(top)}px) translate(-100%, 0)`;
+          avoid.push({ left: cw - 8 - floatEl._dw, right: cw - 8, top, bottom: top + floatEl._dh });
+        } else {
+          if (floatEl.classList.contains('docked')) {
+            floatEl.classList.remove('docked');
+            floatEl._dockName = null;
+            floatEl._w = 0;
+          }
+          // arriba del molde; si ahí lo tapa la barra o el HUD, abajo
+          let y = pTop.y - 14;
+          let below = false;
+          const hud = hudR;
+          const blocked = y - fh < insets.top + 4 || (hud && pTop.x - fw / 2 < hud.right && pTop.x + fw / 2 > hud.left && y - fh < hud.bottom);
+          if (blocked) {
+            const pBot = toScreen(it.vis.x, it.vis.z + b.maxZ, 0.01);
+            y = pBot.y + 14;
+            below = true;
+          }
+          floatEl.classList.toggle('below', below);
+          const x = clamp(pTop.x, fw / 2 + 4, cw - insets.right - fw / 2 - 4);
+          floatEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, ${below ? '0' : '-100%'})`;
+          avoid.push({ left: x - fw / 2, right: x + fw / 2, top: below ? y : y - fh, bottom: below ? y + fh : y });
+        }
+      } else floatEl.classList.remove('show');
+
       const put = (el, p, show = true) => {
         if (!show || p.behind) {
           el.style.display = 'none';
           return;
         }
         el.style.display = '';
-        el.style.transform = `translate(${Math.round(r.left + p.x)}px, ${Math.round(r.top + p.y)}px) translate(-50%, -50%)`;
+        if (!el._w) {
+          el._w = el.offsetWidth;
+          el._h = el.offsetHeight;
+        }
+        const hw = (el._w || 80) / 2 + 4;
+        const hh = (el._h || 20) / 2 + 4;
+        const hits = (a, y) => p.x + hw > a.left && p.x - hw < a.right && y + hh > a.top && y - hh < a.bottom;
+        // debajo del HUD: se corre un poco hacia abajo (sobre la tela) en vez de desaparecer
+        let y = p.y;
+        if (hudR && hits(hudR, y)) y = hudR.bottom + hh;
+        // si cae encima de la indicación o de la barra flotante, mejor no mostrarla
+        if (avoid.some((a) => hits(a, y))) {
+          el.style.display = 'none';
+          return;
+        }
+        el.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(y)}px) translate(-50%, -50%)`;
       };
       const lx = 1.3;
       const len = table.shownLength;
@@ -1018,32 +1270,12 @@ export default {
       put(selLabels[1], toScreen(L - 0.22, W + 0.032), phase !== 'done');
       if (lp) {
         const txt = `✂ <b>${mTxt(len)} m</b>`;
-        if (lenLabel.innerHTML !== txt) lenLabel.innerHTML = txt;
+        if (lenLabel.innerHTML !== txt) {
+          lenLabel.innerHTML = txt;
+          lenLabel._w = 0;
+        }
         put(lenLabel, lp);
       } else lenLabel.style.display = 'none';
-      // barra flotante del molde elegido
-      const it = selected ? items.get(selected) : null;
-      if (it && it.placed && phase === 'layout' && !drag) {
-        const b = localBounds(it.piece, it.pl.rot);
-        const pTop = toScreen(it.vis.x, it.vis.z + b.minZ, 0.01);
-        const nm = floatEl.querySelector('.tiz-float-name');
-        if (nm.textContent !== it.piece.name) nm.textContent = it.piece.name;
-        floatEl.classList.add('show');
-        // arriba del molde; si ahí lo tapa la barra o el HUD, abajo
-        let y = pTop.y - 14;
-        let below = false;
-        const hud = hudRect();
-        const fw = 150;
-        const blocked = y - 44 < insets.top + 4 || (hud && pTop.x - fw / 2 < hud.right && pTop.x + fw / 2 > hud.left && y - 44 < hud.bottom);
-        if (blocked) {
-          const pBot = toScreen(it.vis.x, it.vis.z + b.maxZ, 0.01);
-          y = pBot.y + 14;
-          below = true;
-        }
-        floatEl.classList.toggle('below', below);
-        const x = clamp(pTop.x, fw / 2 + 4, cw - insets.right - fw / 2 - 4);
-        floatEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, ${below ? '0' : '-100%'})`;
-      } else floatEl.classList.remove('show');
     }
 
     // ---------------- acomodo automático ----------------
@@ -1053,39 +1285,47 @@ export default {
         const it = items.get(pl.id);
         if (!it) continue;
         const from = it.placed ? { x: it.vis.x, z: it.vis.z, rot: it.vis.rot, lift: it.vis.lift } : { x: L + 0.4, z: pl.z, rot: 0, lift: 0.08 };
+        // mientras espera su turno (delay) el molde se queda donde arranca su vuelo, fuera de la
+        // tela, y no en su posición vieja (el centro de la tela para los que venían de la bandeja)
+        Object.assign(it.vis, from, { opacity: 1 });
         it.placed = true;
         it.obj.group.visible = true;
         it.obj.setOpacity(1);
         it.pl.x = pl.x;
         it.pl.z = pl.z;
         it.pl.rot = normRot(pl.rot);
-        it.tween = { from, to: { x: pl.x, z: pl.z, rot: it.pl.rot }, t: 0, dur, delay: i * stagger, arc: 0.05 };
-        ctx.timeout(() => audio.play('cut'), (i * stagger + dur * 0.2) * 1000);
+        it.tween = { from, to: { x: pl.x, z: pl.z, rot: it.pl.rot }, t: 0, dur, delay: i * stagger, arc: 0.05, sound: true };
         i++;
       }
-      return (i * stagger + dur) * 1000;
+      return whenSettled();
     }
 
-    function autoArrange() {
-      if (phase !== 'layout') return;
+    async function autoArrange() {
+      if (phase !== 'layout' || arranging || confirming) return;
+      arranging = true;
       usedAuto = true;
       selected = null;
-      const ms = applyLayout(autoRef);
+      ui.enableAction('acomodar', false);
+      ui.enableAction('tizar', false);
+      const done = applyLayout(autoRef);
       refresh(false);
-      ctx.timeout(() => {
-        refresh(true);
-        ui.toast(`🧩 Acomodo por columnas: ${pctTxt(autoRef.efficiency)} de aprovechamiento. ¿Le ganás encastrando a mano?`, 'info', 3600);
-      }, ms + 50);
+      await done;
+      arranging = false;
+      if (!ctx.alive || phase !== 'layout') return;
+      ui.enableAction('acomodar', true);
+      refresh(true);
+      ui.toast(`🧩 Acomodo por columnas: ${pctTxt(autoRef.efficiency)} de aprovechamiento. ¿Le ganás encastrando a mano?`, 'info', 3600);
     }
 
     // ---------------- tizado (la tiza recorre los contornos) ----------------
-    async function moveChalk(from, to, dur, arc = 0.06) {
+    async function moveChalk(from, to, dur, arc = 0.06, extra = null) {
       const p0 = from.clone();
       await tweenP(dur, (k) => {
         const e = easeInOutCubic(k);
         tmpV.lerpVectors(p0, to, e);
         tmpV.y += arc * Math.sin(Math.PI * k);
         chalk.position.copy(tmpV);
+        if (extra) extra(e);
       });
     }
 
@@ -1115,7 +1355,7 @@ export default {
       const total = cum[cum.length - 1];
       await moveChalk(chalk.position, worldOf(pts[0].x, pts[0].z, 0.001), 0.32, 0.07);
       if (!ctx.alive) return;
-      const line = table.addChalkLine(pts);
+      const line = table.addChalkLine(pts, { offset: 0.0022 });
       let seg = 0;
       let sndT = 0;
       const speed = 1.45;
@@ -1131,6 +1371,11 @@ export default {
         const head = Math.atan2(-(b.z - a.z), b.x - a.x);
         chalk.rotation.set(CHALK_TILT, chalk.rotation.y + wrapPi(head - chalk.rotation.y) * 0.35, 0);
         line.setProgress(k);
+        if (pauseAt && table.chalkLines.length >= pauseAt.lines && k >= pauseAt.k) {
+          pauseAt = null;
+          timeScale = 0; // pausa de prueba (_test.pauseAt); se reanuda con _test.speed()
+          document.body.dataset.tizPaused = '1';
+        }
         table.puff(x, z, 1);
         sndT += sdt;
         if (sndT > 0.055) {
@@ -1165,7 +1410,7 @@ export default {
     }
 
     async function tizar(auto) {
-      if (phase !== 'layout') return;
+      if (phase !== 'layout' || arranging || confirming) return;
       const pls = placements();
       if (pls.length !== order.length) return;
       const ev = evaluateLayout(pattern, pls);
@@ -1176,12 +1421,17 @@ export default {
       }
       const wrong = pls.filter((p) => !isGrainOk(p.rot));
       if (wrong.length && !auto) {
-        const r = await ui.modal({
+        // Mientras el diálogo está abierto no se puede abrir otro: el botón Tizar enfocado
+        // recibiría el Enter con el que se quiere responder. El foco va a "Corregir".
+        confirming = true;
+        ui.enableAction('tizar', false);
+        document.activeElement?.blur?.();
+        const asked = ui.modal({
           title: '¿Tizar con el hilo cruzado?',
           body: h(
             'div',
             {},
-            h('p', { html: `${wrong.length === 1 ? 'Un molde tiene' : `${wrong.length} moldes tienen`} la <b>flecha de hilo cruzada</b> (${wrong.map((p) => pieceName(p.id)).join(', ')}).` }),
+            h('p', { html: `${wrong.length === 1 ? 'Un molde tiene' : `${wrong.length} moldes tienen`} la <b>flecha de hilo cruzada</b>: ${wrong.map((p) => `<b>${pieceName(p.id)}</b>`).join(', ')}.` }),
             h('p', { html: 'Cortada así, la pieza estira para el lado equivocado y la remera se tuerce al lavarla. Cada una resta <b>15 puntos</b>.' }),
           ),
           actions: [
@@ -1189,7 +1439,27 @@ export default {
             { id: 'go', label: 'Tizar igual', kind: 'primary' },
           ],
         });
-        if (r !== 'go' || !ctx.alive || phase !== 'layout') return;
+        const wraps = document.querySelectorAll('#modal-root .modal-wrap');
+        wraps[wraps.length - 1]?.querySelector('.modal-foot .btn')?.focus({ preventScroll: true });
+        let r = null;
+        try {
+          r = await asked;
+        } finally {
+          confirming = false;
+        }
+        if (!ctx.alive) return;
+        if (r !== 'go' || phase !== 'layout') {
+          if (phase === 'layout') {
+            // Corregir: queda elegido el primer molde con el hilo cruzado, listo para girarlo
+            const first = wrong.find((p) => items.get(p.id)?.placed);
+            if (first) {
+              selected = first.id;
+              bringToTop(first.id);
+            }
+            refresh(true);
+          }
+          return;
+        }
       }
       phase = 'chalk';
       speedMul = auto ? 2.6 : 1;
@@ -1207,16 +1477,26 @@ export default {
       q('.tiz-hud-status').className = 'tiz-hud-status';
       q('.tiz-hud-status').textContent = '🖍️ Tizando…';
       table.setOverlap(null);
+      // por si algún molde todavía se está acomodando (el imán al soltar): la tiza arranca con todos apoyados
+      await whenSettled();
+      if (!ctx.alive) return;
       // orden: de izquierda a derecha
       const seq = placedItems().sort((a, b) => a.pl.x - b.pl.x || a.pl.z - b.pl.z);
       if (chalk) {
         if (chalk.parent !== chalkRest.parent) chalkRest.parent?.add(chalk);
         chalk.visible = true;
-        chalk.scale.copy(chalkRest.scale).multiplyScalar(isMobile() ? 3 : 2.3); // que se vea a esta distancia
+        setChalkLook(true);
+        // que se vea a esta distancia: ~40 px de tiza en pantalla (30 en el celular), sea cual sea la ventana
+        chalkK = clamp((isMobile() ? 30 : 40) / (0.048 / metersPerPx()), 1.8, 3.6);
+        chalkSize = 0.048 * chalkK;
         // inclinada sobre el filo, como se la sostiene: así desde arriba se ve la cara de la tiza
         chalk.rotation.order = 'YXZ';
-        chalk.rotation.set(CHALK_TILT, chalk.rotation.y, 0);
-        await moveChalk(chalk.position, worldOf(seq[0].pl.x, seq[0].pl.z, 0.05), 0.55, 0.12);
+        const ry = chalk.rotation.y;
+        const rx0 = chalk.rotation.x;
+        await moveChalk(chalk.position, worldOf(seq[0].pl.x, seq[0].pl.z, 0.05), 0.55, 0.12, (e) => {
+          chalk.scale.copy(chalkRest.scale).multiplyScalar(1 + (chalkK - 1) * e);
+          chalk.rotation.set(rx0 + (CHALK_TILT - rx0) * e, ry, 0);
+        });
       }
       let n = 0;
       for (const it of seq) {
@@ -1226,10 +1506,17 @@ export default {
         if (chalk) await chalkPiece(it);
       }
       if (!ctx.alive) return;
-      if (chalk) await moveChalk(chalk.position, chalkRest.position, 0.6, 0.12);
       if (chalk) {
+        const r0 = chalk.rotation.clone();
+        const r1 = chalkRest.rotation;
+        await moveChalk(chalk.position, chalkRest.position, 0.6, 0.12, (e) => {
+          chalk.scale.copy(chalkRest.scale).multiplyScalar(chalkK + (1 - chalkK) * e);
+          chalk.rotation.set(r0.x + (r1.x - r0.x) * e, r0.y + wrapPi(r1.y - r0.y) * e, r0.z + (r1.z - r0.z) * e);
+        });
         chalk.rotation.copy(chalkRest.rotation);
         chalk.scale.copy(chalkRest.scale);
+        chalkSize = 0;
+        setChalkLook(false);
       }
       if (!ctx.alive) return;
       phase = 'done';
@@ -1246,6 +1533,16 @@ export default {
       state.layout.usedAuto = usedAuto || auto;
       addFabricCosts(ctx, fabric, fabricLength, pattern);
       const { score, notes } = scoreLayout({ efficiency: ev.efficiency, fabricLength, grainWrong, selvedge }, { ref, autoRef, usedAuto, auto, fabric, state, pattern, pieceName, selvedgeForced });
+      // récord personal: solo cuentan los acomodos hechos (o mejorados) a mano y con el hilo derecho
+      const ownWork = !auto && !(usedAuto && autoRef && ev.efficiency <= autoRef.efficiency + 0.005) && !grainWrong.length;
+      if (ownWork && (!personalBest || ev.efficiency > personalBest + 0.0005)) {
+        if (personalBest) notes.splice(1, 0, `🏆 <b>¡Nuevo récord personal</b> para este molde! Antes tu mejor tizado aprovechaba el ${pctTxt(personalBest)}.`);
+        try {
+          localStorage.setItem(bestKey, String(Math.round(ev.efficiency * 1000) / 1000));
+        } catch (e) {
+          /* sin storage: no se guarda el récord */
+        }
+      }
       const extra = h(
         'div',
         { class: 'tiz-result' },
@@ -1267,22 +1564,101 @@ export default {
     }
 
     async function autoComplete() {
-      if (phase !== 'layout') return;
+      if (phase !== 'layout' || confirming) return;
       phase = 'arranging';
+      arranging = true;
       ui.enableAction('tizar', false);
       ui.enableAction('acomodar', false);
       ui.enableAction('auto', false);
       selected = null;
-      const ms = applyLayout(autoRef, { stagger: 0.05, dur: 0.4 });
-      phase = 'layout';
-      refresh(false);
-      phase = 'arranging';
-      await new Promise((r) => ctx.timeout(r, ms + 120));
+      hover = null;
+      drag = null;
+      pendingCard = null;
+      ghost.classList.remove('show');
+      canvas.style.cursor = '';
+      const done = applyLayout(autoRef, { stagger: 0.05, dur: 0.4 });
+      refresh(false); // fase 'arranging': Tizar sigue deshabilitado mientras vuelan
+      await done;
       if (!ctx.alive) return;
+      arranging = false;
       phase = 'layout';
       refresh(true);
       await tizar(true);
     }
+
+    // ganchos para pruebas automáticas (window.__taller.step._test)
+    const step = this;
+    const testApi = {
+      speed(k = 1) {
+        timeScale = Math.max(0.1, +k || 1);
+        delete document.body.dataset.tizPaused;
+        return timeScale;
+      },
+      // congela la animación cuando la tiza va por la línea n (1 = primera pieza) al k (0..1) del recorrido
+      pauseAt(lines = 1, k = 0.5) {
+        pauseAt = { lines, k };
+        return true;
+      },
+      get paused() {
+        return timeScale === 0;
+      },
+      // salta el vuelo de cámara (el render por software va a ~1 fps)
+      skipFlight() {
+        flightId++;
+        engine.flyTo({ ...view, duration: 0 });
+        setNear(nearFor(view));
+        return true;
+      },
+      info() {
+        const pls = placements();
+        return {
+          phase,
+          selected,
+          valid: !ui.action('tizar')?.disabled,
+          efficiency: an ? Math.round(an.efficiency * 1000) / 1000 : 0,
+          placements: pls.map((p) => ({ id: p.id, x: round3(p.x), z: round3(p.z), rot: round3(normRot(p.rot)), grainOk: isGrainOk(p.rot), ...(an?.flags.get(p.id) ? { overlap: an.flags.get(p.id).overlap, outside: an.flags.get(p.id).outside, selvedge: an.flags.get(p.id).selvedge } : {}) })),
+          chalk: chalk ? chalk.position.toArray().map(round3) : null,
+          chalkLines: table.chalkLines.length,
+        };
+      },
+      // centro en pantalla (px) de un punto de la tela o de un molde ubicado
+      toScreen(x, z) {
+        const p = toScreen(x, z);
+        return [Math.round(p.x), Math.round(p.y)];
+      },
+      pieceScreen(id) {
+        const it = items.get(id);
+        return it ? testApi.toScreen(it.vis.x, it.vis.z) : null;
+      },
+      cardScreen(id) {
+        const r = cards.get(id)?.card.getBoundingClientRect();
+        return r ? [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] : null;
+      },
+      refLayout: () => ({ ref: ref?.efficiency, auto: autoRef?.efficiency, target: targetEff }),
+      refPlacements: () => (ref?.placements || []).map((p) => ({ ...p })),
+      // ubica un molde directo (para armar escenas de prueba); rot en radianes
+      place(id, x, z, rot = HALF_PI, { select: sel = false } = {}) {
+        const it = items.get(id);
+        if (!it || phase !== 'layout') return false;
+        it.placed = true;
+        it.tween = null;
+        it.pl.x = it.vis.x = x;
+        it.pl.z = it.vis.z = z;
+        it.pl.rot = it.vis.rot = normRot(rot);
+        it.vis.lift = 0;
+        it.obj.setOpacity(1);
+        it.obj.group.visible = true;
+        bringToTop(id);
+        if (sel) selected = id;
+        refresh(true);
+        return true;
+      },
+    };
+    step._test = testApi;
+    ctx.track(() => {
+      if (step._test === testApi) delete step._test;
+      delete document.body.dataset.tizPaused;
+    });
 
     // estado inicial
     refresh(true);

@@ -234,8 +234,12 @@ export function paperCanvas(piece, { sizeLabel = '', info = '', pxPerM = 760, ma
   ctx.textBaseline = 'middle';
   if (!strip) {
     const big = Math.min(0.048, w * 0.13, h * 0.08);
+    const withInfo = !!info && h > 0.4;
+    // el bloque crece hacia la flecha (las líneas giradas se apilan hacia −x): que no la pise
+    const reach = (withInfo ? 1.95 : 1.15) * big;
+    const tx = Math.min(w / 2 - 0.7 * big, Math.max(Math.min(w * 0.16, 0.09), 0.03 + reach));
     ctx.save();
-    ctx.translate(X(Math.min(w * 0.16, 0.09)), Y(0));
+    ctx.translate(X(tx), Y(0));
     ctx.rotate(Math.PI / 2);
     ctx.fillStyle = ink;
     ctx.font = `700 ${Math.round(big * s)}px Georgia, 'Iowan Old Style', serif`;
@@ -244,7 +248,7 @@ export function paperCanvas(piece, { sizeLabel = '', info = '', pxPerM = 760, ma
     ctx.fillStyle = 'rgba(74,49,34,0.85)';
     const sub = [sizeLabel ? `Talle ${sizeLabel}` : '', `Cortar ×${piece.count || 1}`].filter(Boolean).join('  ·  ');
     ctx.fillText(sub, 0, big * 0.9 * s);
-    if (info && h > 0.4) {
+    if (withInfo) {
       ctx.font = `500 ${Math.round(big * 0.44 * s)}px ui-rounded, 'Nunito', system-ui, sans-serif`;
       ctx.fillText(info, 0, big * 1.7 * s);
     }
@@ -315,7 +319,7 @@ export function createPaperPiece(piece, { sizeLabel = '', info = '' } = {}) {
   const tex = new THREE.CanvasTexture(paperCanvas(piece, { sizeLabel, info }));
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
-  const paperMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0, transparent: true, opacity: 0.96, color: '#ffffff', envMapIntensity: 0.45 });
+  const paperMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0, transparent: true, opacity: 0.93, color: '#ffffff', envMapIntensity: 0.45 });
   const paper = new THREE.Mesh(shapeGeometry(piece.outline, w, h), paperMat);
   paper.castShadow = true;
   paper.receiveShadow = false;
@@ -385,7 +389,7 @@ export function createPaperPiece(piece, { sizeLabel = '', info = '' } = {}) {
       paperMat.color.copy(st.bad ? tint.clone().lerp(tintBad, 0.65 + 0.35 * Math.sin(t * 7)) : tint);
     },
     setOpacity(o) {
-      paperMat.opacity = 0.96 * o;
+      paperMat.opacity = 0.93 * o;
       arrowMat.opacity = o;
       halo.material.opacity *= o;
       paper.castShadow = o > 0.5;

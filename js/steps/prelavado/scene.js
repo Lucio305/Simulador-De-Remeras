@@ -6,7 +6,8 @@
 import { getFabricMaterial } from '../../materials/fabric.js';
 import { boxUV } from '../../world/props/common.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { mixHex, clamp, lerp } from '../../core/utils.js';
+import { clamp, lerp, smoothstep } from '../../core/utils.js';
+import { luminance } from '../../data/catalog.js';
 
 // Medidas del lavarropas (ver js/world/props/washingMachine.js).
 export const WM = { H: 0.85, W: 0.6, D: 0.56, DOOR_Y: 0.4, FRONT_Z: 0.245, DRUM_R: 0.235 };
@@ -27,8 +28,24 @@ export function createLaundryScene(ctx, { fabricId, color, heather, anchor }) {
   const base = getFabricMaterial(fabricId, color, { heather });
   const wetMat = own(base.clone());
   wetMat.userData = {};
-  const dryColor = new THREE.Color(base.color);
+  // En el jaspeado el tono va en el map y el color del material es blanco: un cambio de color
+  // (media que tiñe, sol que destiñe) se aplica como factor relativo (nuevo / original) sobre el
+  // color base del material, así no se multiplica dos veces el tono (y no se oscurece de más).
+  const origColor = new THREE.Color(color);
+  const baseColor = new THREE.Color(base.color);
+  const relColor = (hex, out) => {
+    const c = new THREE.Color(hex);
+    return out.setRGB(
+      baseColor.r * (c.r / Math.max(1e-4, origColor.r)),
+      baseColor.g * (c.g / Math.max(1e-4, origColor.g)),
+      baseColor.b * (c.b / Math.max(1e-4, origColor.b)),
+    );
+  };
+  const dryColor = baseColor.clone();
   const wetColor = dryColor.clone().multiplyScalar(0.62);
+  // brillo cálido del sol proporcional a la claridad de la tela: en una tela negra un emisivo
+  // fuerte la haría ver marrón (parece que cambió de color, no que se secó al sol)
+  const sunGlow = 0.008 + 0.09 * smoothstep(0.12, 0.6, luminance(color));
 
   // ---------- corte de tela doblado ----------
   const bundle = new THREE.Group();
@@ -137,6 +154,11 @@ export function createLaundryScene(ctx, { fabricId, color, heather, anchor }) {
     cuff.position.set(-0.07, 0, 0);
     sock = new THREE.Group();
     sock.add(tube, toe, cuff);
+    // colisionador invisible generoso: la media es finita y se toca con el dedo
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.scale.set(1.25, 0.8, 1);
+    hit.name = 'media-roja-hit';
+    sock.add(hit);
     sock.name = 'media-roja';
     sock.position.set(ax + 0.02, WM.DOOR_Y - WM.DRUM_R + 0.03, front - 0.13);
     sock.rotation.set(0.05, 0.5, 0.25);
@@ -317,7 +339,7 @@ export function createLaundryScene(ctx, { fabricId, color, heather, anchor }) {
       wetMat.roughness = lerp(base.roughness, Math.max(0.35, base.roughness - 0.3), wet);
     },
     setTint(hex) {
-      dryColor.set(hex);
+      relColor(hex, dryColor);
       wetColor.copy(dryColor).multiplyScalar(0.62);
       api.setWet(wet);
     },
@@ -336,7 +358,7 @@ export function createLaundryScene(ctx, { fabricId, color, heather, anchor }) {
       bubbleTarget = on ? 1 : 0;
     },
     setFade(hex) {
-      dryColor.set(hex);
+      relColor(hex, dryColor);
       api.setWet(wet);
     },
     setRing(opacity) {
@@ -371,7 +393,7 @@ export function createLaundryScene(ctx, { fabricId, color, heather, anchor }) {
         if (d.position.y < WM.H + 0.004) d.visible = false;
       }
       sunAmt += (sunTarget - sunAmt) * (1 - Math.exp(-dt * 3));
-      wetMat.emissive.copy(warm).multiplyScalar(sunAmt * 0.1);
+      wetMat.emissive.copy(warm).multiplyScalar(sunAmt * sunGlow);
       // burbujas
       bubbleAmt += (bubbleTarget - bubbleAmt) * (1 - Math.exp(-dt * 4));
       for (const m of bubbles) {
