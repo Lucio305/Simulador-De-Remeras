@@ -40,6 +40,9 @@ export class Engine {
     this._updaters = new Set();
     this._pointerHandlers = new Set();
     this._flight = null;
+    // Márgenes de pantalla tapados por la UI (panel): la escena se centra en el área libre.
+    this._inset = { right: 0, bottom: 0 };
+    this._insetTarget = { right: 0, bottom: 0 };
     this.clock = new THREE.Clock();
     this.raycaster = new THREE.Raycaster();
     this.pointer = { ndc: new THREE.Vector2(), x: 0, y: 0, down: false, buttons: 0, inside: false };
@@ -132,6 +135,27 @@ export class Engine {
     const h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
+    this._applyInset();
+  }
+
+  // Indica cuántos px de la derecha / de abajo tapa la interfaz, para centrar
+  // la cámara en el área visible. Se anima suavemente.
+  setInsets({ right = 0, bottom = 0 } = {}, immediate = false) {
+    this._insetTarget.right = right;
+    this._insetTarget.bottom = bottom;
+    if (immediate) {
+      this._inset.right = right;
+      this._inset.bottom = bottom;
+      this._applyInset();
+    }
+  }
+
+  _applyInset() {
+    const w = this.canvas.clientWidth || window.innerWidth;
+    const h = this.canvas.clientHeight || window.innerHeight;
+    const { right, bottom } = this._inset;
+    if (right > 0.5 || bottom > 0.5) this.camera.setViewOffset(w, h, right / 2, bottom / 2, w, h);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
   }
 
@@ -143,7 +167,10 @@ export class Engine {
     const t0 = this.controls.target.clone();
     const f0 = this.camera.fov;
     const f1 = fov ?? f0;
-    if (this._flight) this._flight.resolve();
+    if (this._flight) {
+      this._flight.resolve();
+      this._flight = null;
+    }
     if (duration <= 0) {
       this.camera.position.copy(p1);
       this.controls.target.copy(t1);
@@ -208,6 +235,17 @@ export class Engine {
   _tick() {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const t = this.clock.elapsedTime;
+
+    const it = this._insetTarget;
+    const ic = this._inset;
+    if (Math.abs(it.right - ic.right) > 0.5 || Math.abs(it.bottom - ic.bottom) > 0.5) {
+      const k = 1 - Math.exp(-dt * 8);
+      ic.right += (it.right - ic.right) * k;
+      ic.bottom += (it.bottom - ic.bottom) * k;
+      if (Math.abs(it.right - ic.right) <= 0.5) ic.right = it.right;
+      if (Math.abs(it.bottom - ic.bottom) <= 0.5) ic.bottom = it.bottom;
+      this._applyInset();
+    }
 
     if (this._flight) {
       const f = this._flight;

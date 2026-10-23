@@ -12,6 +12,7 @@ import { createWorkshop } from './world/workshop.js';
 import { createPattern } from './shirt/pattern.js';
 import { Shirt3D } from './shirt/shirt3d.js';
 import { STEPS } from './steps/index.js';
+import { preloadWeavesIdle } from './materials/fabric.js';
 
 const params = new URLSearchParams(location.search);
 
@@ -315,6 +316,7 @@ async function boot() {
   engine.scene.add(shirt.group);
   if (shirt.update) engine.onUpdate((dt, t) => shirt.update(dt, t));
 
+  ui.onLayout = (insets) => engine.setInsets(insets);
   bus.on('cost:change', (total) => ui.setCost(total));
   ui.setCost(totalCost());
 
@@ -337,6 +339,8 @@ async function boot() {
 
   engine.flyTo({ ...STATIONS.entrada.view, duration: 0 });
   ui.loading(null);
+  // Texturas completas de todas las telas y miniaturas, en segundo plano.
+  setTimeout(() => preloadWeavesIdle?.().catch?.(() => {}), 600);
 
   const jump = params.get('step');
   const jumpIndex = jump ? STEPS.findIndex((s) => s.id === jump) : -1;

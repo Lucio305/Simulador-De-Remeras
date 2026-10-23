@@ -33,14 +33,6 @@ function noiseBuffer(c, seconds = 1) {
 let _noise = null;
 const noise = (c) => (_noise ||= noiseBuffer(c, 2));
 
-function env(g, c, a, peak, d, end = 0.0001) {
-  const t = c.currentTime;
-  g.gain.cancelScheduledValues(t);
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(peak, t + a);
-  g.gain.exponentialRampToValueAtTime(end, t + a + d);
-}
-
 function tone(freq, { type = 'sine', a = 0.005, d = 0.2, vol = 0.3, slide = 0, delay = 0 } = {}) {
   const c = ac();
   if (!c) return;

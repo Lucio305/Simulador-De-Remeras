@@ -52,7 +52,28 @@ export const ui = {
     this.modalRoot = $('modal-root');
     this.stepperEl = $('stepper');
     this._actions = new Map();
-    $('panel-toggle')?.addEventListener('click', () => this.panelEl.classList.toggle('collapsed'));
+    $('panel-toggle')?.addEventListener('click', () => {
+      this.panelEl.classList.toggle('collapsed');
+      this._layout();
+    });
+    window.addEventListener('resize', () => this._layout());
+  },
+
+  // Callback que main usa para avisarle al motor cuánto tapa el panel.
+  onLayout: null,
+
+  _layout() {
+    if (!this.onLayout) return;
+    const p = this.panelEl;
+    const hidden = p.classList.contains('hidden');
+    const mobile = window.matchMedia('(max-width: 820px)').matches;
+    let right = 0;
+    let bottom = 0;
+    if (!hidden) {
+      if (mobile) bottom = p.classList.contains('collapsed') ? 64 : Math.min(p.offsetHeight || window.innerHeight * 0.48, window.innerHeight * 0.48);
+      else right = (p.offsetWidth || 380) + 24;
+    }
+    this.onLayout({ right, bottom });
   },
 
   // ---------- Panel lateral ----------
@@ -68,15 +89,18 @@ export const ui = {
     this.bodyEl.scrollTop = 0;
     if (actions) this.setActions(actions);
     else this.setActions([]);
+    requestAnimationFrame(() => this._layout());
     return this.bodyEl;
   },
 
   hidePanel() {
     this.panelEl.classList.add('hidden');
+    this._layout();
   },
 
   showPanel() {
     this.panelEl.classList.remove('hidden');
+    this._layout();
   },
 
   // Reemplaza el contenido del cuerpo del panel sin tocar título ni acciones.
@@ -215,10 +239,13 @@ export const ui = {
 
   loading(text) {
     const el = $('loading');
+    clearTimeout(this._loadingTimer);
     if (!text) {
       el.classList.add('done');
+      this._loadingTimer = setTimeout(() => (el.style.display = 'none'), 700);
       return;
     }
+    el.style.display = '';
     el.classList.remove('done');
     el.querySelector('.loading-text').textContent = text;
   },
