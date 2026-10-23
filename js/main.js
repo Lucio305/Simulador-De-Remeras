@@ -78,6 +78,7 @@ function placeShirt(where = 'exhibicion', { inflation = 1, rotationY = 0 } = {})
   shirt.setInflation(inflation);
   shirt.setParts({ frente: true, espalda: true, mangas: true, cuello: true, ruedos: true });
   shirt.setSeams({ hombros: true, cuello: true, mangas: true, sisas: true, costados: true, punos: true, ruedo: true });
+  shirt.setDrape?.(null);
   let anchor;
   if (where === 'preview') anchor = world.props.mannequinPreview?.neckAnchor;
   else anchor = world.props.displayStand?.neckAnchor;

@@ -58,6 +58,26 @@ function raycastIfVisible(raycaster, intersects) {
   THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
 }
 
+// Curva la base de un panel alrededor de un cilindro de radio R a partir de |x| > limit,
+// conservando el largo y el espesor de la tela (la usa setDrape).
+function bendBase(P, { limit, radius: R, maxAngle, up: s }) {
+  const B = P.base;
+  for (let v = 0; v < P.n; v++) {
+    const o = v * 3;
+    const x = B[o];
+    const L = typeof limit === 'function' ? limit(B[o + 1]) : limit;
+    const ex = Math.abs(x) - L;
+    if (ex <= 0) continue;
+    const zz = s * B[o + 2];
+    const a = Math.min(maxAngle, ex / R);
+    const along = Math.max(0, ex - a * R);
+    const sa = Math.sin(a);
+    const ca = Math.cos(a);
+    B[o] = Math.sign(x) * (L + R * sa + along * ca + zz * sa);
+    B[o + 2] = s * (-R * (1 - ca) - along * sa + zz * ca);
+  }
+}
+
 export class Shirt3D {
   constructor({ pattern, fabric, color = '#f3f1ea', heather = false, threadColor = '#f3f1ea' } = {}) {
     this.group = new THREE.Group();
@@ -71,6 +91,7 @@ export class Shirt3D {
     this.threadColor = threadColor;
     this.inflation = 1;
     this.wrinkleAmount = 0;
+    this.drape = null; // caída sobre un borde (planchado): ver setDrape
     this.parts = { frente: true, espalda: true, mangas: true, cuello: true, ruedos: true };
     this.seamProgress = { hombros: 1, cuello: 1, mangas: 1, sisas: 1, costados: 1, punos: 1, ruedo: 1 };
     this.looseThreads = [];
@@ -413,6 +434,10 @@ export class Shirt3D {
     if (this._dirtyBase) {
       F.computeBase(this.inflation);
       B.computeBase(this.inflation);
+      if (this.drape) {
+        bendBase(F, this.drape);
+        bendBase(B, this.drape);
+      }
       computeNormals(F.base, F.index, F.baseN);
       computeNormals(B.base, B.index, B.baseN);
       blendSeamNormals(F, B, F.baseN, B.baseN);
@@ -588,6 +613,14 @@ export class Shirt3D {
         for (const [side, m] of Object.entries(g.meshes)) m.visible = !hide && !!P[side] && m.count > 0;
       }
     }
+  }
+
+  // --- caída ---
+  // Dobla la remera (apoyada plana) hacia abajo a partir de |x| > limit, como tela que cuelga
+  // del borde de una tabla. opts = { limit: número o función y → medio ancho, radius, maxAngle, up: ±1 } | null.
+  setDrape(opts) {
+    this.drape = opts ? { radius: 0.03, maxAngle: 1.42, up: 1, ...opts } : null;
+    this._dirtyBase = true;
   }
 
   // --- arrugas ---

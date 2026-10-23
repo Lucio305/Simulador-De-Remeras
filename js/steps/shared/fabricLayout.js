@@ -96,12 +96,14 @@ export function evaluateLayout(pattern, placements, cell = 0.01) {
         const x = (c + 0.5) * cell;
         const z = (r + 0.5) * cell;
         if (!pointInPolygon(x, z, poly)) continue;
-        pieceArea += cell * cell;
         const k = r * cols + c;
         if (owner[k] >= 0 && owner[k] !== idx) {
           const a = placements[owner[k]].id;
           overlapSet.add(a < pl.id ? `${a}|${pl.id}` : `${pl.id}|${a}`);
-        } else owner[k] = idx;
+        } else {
+          owner[k] = idx;
+          pieceArea += cell * cell;
+        }
       }
     }
   });

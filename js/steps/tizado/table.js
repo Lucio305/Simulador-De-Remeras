@@ -461,6 +461,9 @@ export function createTableScene({ fabric, color, heather, sizeLabel }) {
 
   return {
     group,
+    sheet,
+    shade,
+    contact,
     topWorldY: group.position.y + topY,
     toWorld,
     setLength,
