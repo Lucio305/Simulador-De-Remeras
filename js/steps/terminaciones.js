@@ -1263,7 +1263,8 @@ export default {
       if (autoParts.length === 4) score = clamp(score, 65, 72);
       if (autoParts.length) {
         const list = autoParts.length > 1 ? `${autoParts.slice(0, -1).join(', ')} y ${autoParts[autoParts.length - 1]}` : autoParts[0];
-        notes.push(`${R.MID} En automático, el taller se encargó de <b>${list}</b> a las apuradas (esas partes valen hasta ${AUTO_CAP}). Hacelo vos para sumar más puntos.`);
+        const deList = /^el /.test(list) ? `del <b>${list.slice(3)}</b>` : `de <b>${list}</b>`;
+        notes.push(`${R.MID} En automático, el taller se encargó ${deList} a las apuradas (esas partes valen hasta ${AUTO_CAP}). Hacelo vos para sumar más puntos.`);
       }
       notes.push(...T.notes.filter((n) => !/^Tip:/.test(n)).slice(0, 3));
       if (Lb.auto) {

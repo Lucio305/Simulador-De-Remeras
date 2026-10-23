@@ -218,7 +218,8 @@ export function createThreadHunt(ctx, { pattern, fabricColor, isMobile, onCut, o
   ctx.onPointer('up', (e, p) => {
     const d = downs.get(e.pointerId);
     downs.delete(e.pointerId);
-    if (!active || !d || d.multi) return;
+    // un gesto cancelado por el navegador (pointercancel) no es un toque
+    if (!active || !d || d.multi || e.type === 'pointercancel') return;
     if (e.target !== canvas3d && !(e.target && e.target.classList?.contains('term-lupa-layer'))) return;
     const moved = Math.hypot(p.x - d.x, p.y - d.y);
     const dur = performance.now() - d.t;
