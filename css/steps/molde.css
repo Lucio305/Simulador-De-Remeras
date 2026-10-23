@@ -215,25 +215,21 @@
   filter: drop-shadow(0 6px 14px rgba(43, 36, 32, 0.18));
 }
 
-/* aviso flotante "Ver la moldería" (pegado al borde de abajo del panel mientras la hoja no se ve) */
-.molde-peek-wrap {
-  position: sticky;
-  bottom: 0;
-  height: 0;
-  z-index: 4;
-  pointer-events: none;
-}
-
+/* pestaña "Ver la moldería": pegada al borde del panel del lado de la escena (a la izquierda en
+   escritorio, arriba de la hoja inferior en el celular), así nunca tapa ni intercepta opciones */
 .molde-peek {
   position: absolute;
-  left: 50%;
-  bottom: 8px;
+  right: 100%;
+  bottom: 96px;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 14px 7px 10px;
+  /* en escritorio es un señalador vertical finito: queda en el margen de la escena, sin tapar la remera */
+  writing-mode: vertical-rl;
+  padding: 10px 7px 9px;
   border: none;
-  border-radius: 999px;
+  border-radius: 12px 0 0 12px;
   background: #2c5e4d;
   color: #f4ead8;
   font: inherit;
@@ -241,14 +237,14 @@
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
-  pointer-events: auto;
-  box-shadow: 0 6px 16px rgba(30, 60, 48, 0.32), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-  transform: translateX(-50%);
+  box-shadow: -5px 6px 16px rgba(30, 60, 48, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transform-origin: right center;
   transition: opacity 0.25s, transform 0.25s;
 }
 
 .molde-peek b {
   font-size: 14px;
+  text-orientation: upright;
   animation: molde-peek-bob 1.4s ease-in-out infinite;
 }
 
@@ -270,9 +266,9 @@
   animation: molde-peek-pulse 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.3);
 }
 
-.molde-peek-wrap.hide .molde-peek {
+.molde-peek.hide {
   opacity: 0;
-  transform: translate(-50%, 10px);
+  transform: translateX(14px);
   pointer-events: none;
 }
 
@@ -284,10 +280,10 @@
 
 @keyframes molde-peek-pulse {
   40% {
-    transform: translateX(-50%) scale(1.12);
+    transform: scale(1.1);
   }
   to {
-    transform: translateX(-50%) scale(1);
+    transform: none;
   }
 }
 
@@ -319,9 +315,23 @@
   background: var(--warn);
 }
 
+.molde-mark.ico {
+  background: none;
+  font-size: 13px;
+  color: inherit;
+}
+
 .result-notes li:has(> .molde-mark:first-child) {
   list-style: none;
   margin-left: -18px;
+  padding-left: 21px;
+  text-indent: -21px;
+}
+
+/* en el informe final las notas del paso van alineadas por su marca */
+.fin-step-notes li:has(> .molde-mark:first-child) {
+  list-style: none;
+  margin-left: -16px;
   padding-left: 21px;
   text-indent: -21px;
 }
@@ -684,26 +694,19 @@
     display: none;
   }
 
-  /* en la hoja inferior del celular el aviso va chiquito a la derecha (no tapa las opciones) */
+  /* en el celular la pestaña asoma arriba de la hoja inferior, a la derecha */
   .molde-peek {
-    left: auto;
-    right: -6px;
-    bottom: 4px;
-    padding: 5px 10px 5px 6px;
+    right: 24px;
+    bottom: 100%;
+    writing-mode: horizontal-tb;
+    padding: 6px 11px 6px 7px;
     font-size: 12px;
-    transform: none;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 14px rgba(30, 60, 48, 0.26), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    transform-origin: center bottom;
   }
 
-  .molde-peek-wrap.hide .molde-peek {
+  .molde-peek.hide {
     transform: translateY(10px);
-  }
-
-  @keyframes molde-peek-pulse {
-    40% {
-      transform: scale(1.12);
-    }
-    to {
-      transform: scale(1);
-    }
   }
 }

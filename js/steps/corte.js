@@ -359,8 +359,8 @@ export default {
       const m = isMobile();
       const c = Math.cos(it.pl.rot);
       const s = Math.sin(it.pl.rot);
-      const half = Math.min(it.piece.width / 2, m ? 0.1 : 0.13);
-      const acr = it.piece.height / 2 + (m ? 0.045 : 0.055);
+      const half = Math.min(it.piece.width / 2, m ? 0.1 : 0.19);
+      const acr = it.piece.height / 2 + (m ? 0.045 : 0.085);
       const pts = [
         [half, acr],
         [-half, acr],
@@ -680,6 +680,7 @@ export default {
         h('li', { html: 'La tela bien plana sobre la mesa y la mano libre sosteniéndola cerca de la herramienta, <b>sin estirarla</b>.' }),
         h('li', { html: 'En las curvas (escote, sisa, copa de la manga) <b>bajá la velocidad</b>: es donde más se nota un corte torcido.' }),
         h('li', { html: 'Cúter circular: siempre sobre la <b>base de corte</b>, empujando hacia adelante y con los dedos lejos de la cuchilla.' }),
+        h('li', { html: 'Cada pieza cortada se <b>dobla al medio por el hilo</b> y va a la pila, lejos de lo que falta cortar: así no se estira ni se pisa con la herramienta.' }),
         h('li', { html: fabric.knit ? `En <b>${fabric.short}</b> (tejido de punto) no levantes la tela: si la estirás mientras cortás, la pieza vuelve más chica.` : `El <b>${fabric.short.toLowerCase()}</b> es tejido plano y se deshilacha: herramienta bien afilada y bordes terminados con overlock.` }),
       ),
     );
@@ -803,7 +804,11 @@ export default {
         renderRows();
         // pausa para ver cómo se despega la pieza, se dobla y el hueco que deja
         if (autoMode) await sleep(120);
-        else {
+        else if (items[it.idx + 1]?.method === 'gemela') {
+          // la gemela se corta al lado: que la manga doblada ya esté en la pila
+          await Promise.race([anim.landed, sleep(2600)]);
+          await sleep(120);
+        } else {
           await Promise.race([anim.folded, sleep(1800)]);
           await sleep(220);
         }

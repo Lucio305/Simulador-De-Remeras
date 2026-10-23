@@ -1220,7 +1220,14 @@ export default {
         results.qc = { ...sc, score: autoQcIds.size ? Math.min(sc.score, AUTO_CAP) : sc.score, verdict, mine: null, items: items.length, right, auto: autoQcIds.size > 0 };
       }
       if (!results.fold) {
-        if (fold) fold.finishInstant();
+        if (fold) {
+          fold.finishInstant();
+          // que el panel de atrás de la tarjeta quede coherente (todo doblado y embolsado)
+          if (phase === 'doblado') {
+            refreshFoldButtons();
+            lockPackaging();
+          }
+        }
         const errs = fold ? fold.errors : 0;
         results.fold = { score: Math.min(AUTO_CAP, R.scoreFold(errs)), errors: errs, notes: [`${R.MID} La dobló y embolsó el taller en automático${errs ? ` (antes te habías equivocado ${errs} vez${errs === 1 ? '' : 'es'} en el orden)` : ''}.`], auto: true };
       }

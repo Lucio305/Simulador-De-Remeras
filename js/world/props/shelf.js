@@ -79,7 +79,8 @@ function labelTexture(fabric, highlighted) {
 
 // Malla del paño colgante (perfil 2D en YZ extruido a lo largo de X). uv en metros.
 function buildDrape(geo, { len, width, r, edgeZ, edgeY, amount, t }) {
-  const hang = 0.34 * amount;
+  // paño corto: muestra la tela sobre el canto sin tapar el rollo del estante de abajo
+  const hang = 0.075 * amount;
   const pts = [];
   // del frente del rollo al canto del estante y luego cae
   const a0 = -0.35;

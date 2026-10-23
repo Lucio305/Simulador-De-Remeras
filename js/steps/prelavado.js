@@ -277,7 +277,15 @@ export default {
         position.add(d);
       };
       pan(S.x - C.x, S.y - C.y, real);
-      return { view: { position: position.toArray(), target: target.toArray() }, pan, real, wpp };
+      return {
+        // se arma al pedirla: así refleja los corrimientos finos que se hagan después con pan()
+        get view() {
+          return { position: position.toArray(), target: target.toArray() };
+        },
+        pan,
+        real,
+        wpp,
+      };
     }
 
     function frameView(focus = 'machine') {
@@ -481,9 +489,13 @@ export default {
         const k = !doorOpen ? 'idle' : sockInside ? 'sock' : 'open';
         if (k !== hintKey) {
           hintKey = k;
-          if (k === 'sock') ui.hint('🧦 Tocá la <b>media roja</b> para sacarla del tambor… y después cargá la tela');
-          else if (k === 'open') ui.hint(`${sockRemoved ? '¡Tambor limpio!' : 'Tambor vacío, todo en orden.'} Ahora arrastrá la tela hasta el <b>aro verde</b> de la boca${isMobile() ? ' (o tocala)' : ' (o tocala · <kbd>Espacio</kbd>)'}`);
-          else hintIdle();
+          // (en el celular, textos cortos: la indicación queda justo sobre el tambor)
+          const mob = isMobile();
+          if (k === 'sock') ui.hint(mob ? '🧦 Tocá la <b>media roja</b> para sacarla' : '🧦 Tocá la <b>media roja</b> para sacarla del tambor… y después cargá la tela');
+          else if (k === 'open') {
+            const ok = sockRemoved ? '¡Tambor limpio!' : 'Tambor vacío, todo en orden.';
+            ui.hint(mob ? `${ok} Arrastrá la tela al <b>aro verde</b>` : `${ok} Ahora arrastrá la tela hasta el <b>aro verde</b> de la boca (o tocala · <kbd>Espacio</kbd>)`);
+          } else hintIdle();
         }
       }
       // temperatura
@@ -513,6 +525,16 @@ export default {
         wm.setDisplay(`${t === 0 ? 'FRÍA' : `${t}°C`} ${sel.spin}\n${loaded ? 'LISTO' : 'CARGAR'}`);
         ui.updateAction('start', { label: '▶ Iniciar lavado', disabled: !loaded });
       }
+    }
+
+    // desplazamiento suave del cuerpo del panel; si el navegador no lo anima, va directo
+    function scrollBody(top) {
+      const body = ui.bodyEl;
+      if (!body) return;
+      const start = body.scrollTop;
+      top = Math.max(0, top);
+      body.scrollTo({ top, behavior: 'smooth' });
+      if (Math.abs(top - start) > 4) ctx.timeout(() => body.scrollTop === start && body.scrollTo({ top, behavior: 'auto' }), 250);
     }
 
     // los botones del panel sueltan el foco: así Espacio / Enter siguen manejando el lavarropas
@@ -576,7 +598,7 @@ export default {
                   if (isMobile() && tempSection && ui.bodyEl) {
                     const br = ui.bodyEl.getBoundingClientRect();
                     const er = tempSection.getBoundingClientRect();
-                    ui.bodyEl.scrollTo({ top: Math.max(0, ui.bodyEl.scrollTop + er.top - br.top - 6), behavior: 'smooth' });
+                    scrollBody(ui.bodyEl.scrollTop + er.top - br.top - 6);
                   }
                   ui.hint('¡Adentro! Ahora programá <b>temperatura</b>, <b>centrifugado</b> y <b>secado</b> en el panel y tocá <b>Iniciar lavado</b>');
                   ctx.timeout(() => phase === 'ready' && ui.hint(null), 7000);
@@ -805,7 +827,7 @@ export default {
       tipHead = head;
       const card = h('div', { class: 'prela-tip' }, h('div', { class: 'prela-tip-head' }, h('span', { class: 'prela-tip-ico', 'aria-hidden': 'true' }, '🫧'), head), txt, dots);
       controlsEl.parentNode.insertBefore(card, controlsEl);
-      if (ui.bodyEl) ui.bodyEl.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollBody(0);
       ctx.interval(() => {
         if (phase === 'done') return;
         i = (i + 1) % WASH_TIPS.length;

@@ -129,7 +129,9 @@ export function createThreadRack({ center, width = 0.82, height = 0.66 }) {
     sg.add(mesh(cone.paper, paperMat), threadMesh);
     group.add(sg);
     // etiqueta debajo
-    const lbl = mesh(new THREE.PlaneGeometry(0.11, 0.028), std(`etiqueta-hilo-${th.id}`, { map: threadLabel(th), roughness: 0.8 }), {
+    const lblMap = threadLabel(th);
+    const lblMat = std(`etiqueta-hilo-${th.id}`, { map: lblMap, roughness: 0.8, emissive: new THREE.Color('#ffd8a0'), emissiveIntensity: 0, emissiveMap: lblMap });
+    const lbl = mesh(new THREE.PlaneGeometry(0.11, 0.028), lblMat, {
       p: [x, midY - 0.085, 0.0185],
     });
     group.add(lbl);
@@ -153,6 +155,8 @@ export function createThreadRack({ center, width = 0.82, height = 0.66 }) {
         sg.position.copy(this._base).addScaledVector(pegDir, 0.03 * this._a).add(V3(0, 0, 0.015 * this._a));
         sg.quaternion.copy(qPeg);
         sg.rotateY(this._a * 0.6);
+        sg.scale.setScalar(1 + 0.14 * this._a);
+        lblMat.emissiveIntensity = 0.55 * this._a;
       },
     };
     spools.push(spool);

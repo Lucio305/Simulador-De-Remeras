@@ -209,9 +209,9 @@ export const THREADS = [
 ];
 
 export const THREAD_THICKNESS = [
-  { id: 'fino', name: 'Fino (Tex 18)', maxGsm: 160, minGsm: 0 },
-  { id: 'medio', name: 'Medio (Tex 27)', maxGsm: 220, minGsm: 130 },
-  { id: 'grueso', name: 'Grueso (Tex 40)', maxGsm: 999, minGsm: 210 },
+  { id: 'fino', name: 'Fino (Tex 18)', maxGsm: 155, minGsm: 0 },
+  { id: 'medio', name: 'Medio (Tex 27)', maxGsm: 195, minGsm: 145 },
+  { id: 'grueso', name: 'Grueso (Tex 40)', maxGsm: 999, minGsm: 190 },
 ];
 
 export const NEEDLES = [

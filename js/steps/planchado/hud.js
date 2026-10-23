@@ -1,9 +1,10 @@
-// HUD del planchado (arriba a la izquierda): arrugas por lado, temperatura de la suela,
-// vapor y alertas. Se actualiza solo cuando cambia algo (sin tocar el DOM en cada cuadro).
+// HUD del planchado (arriba a la izquierda): arrugas por lado, botón para dar vuelta la remera,
+// temperatura de la suela, vapor y alertas. Se actualiza solo cuando cambia algo (sin tocar el
+// DOM en cada cuadro). El HUD no toma el puntero salvo el botón.
 
 import { clamp } from '../../core/utils.js';
 
-export function createHud(h) {
+export function createHud(h, { onFlip } = {}) {
   const sideRow = (id, name) => {
     const fill = h('i', { class: 'pl-bar-fill' });
     const pct = h('b', { class: 'pl-side-pct' }, '100 %');
@@ -26,11 +27,20 @@ export function createHud(h) {
   const burnFlag = h('span', { class: 'pl-flag bad', style: { display: 'none' } }, '');
   const timeFlag = h('span', { class: 'pl-flag pl-flag-time', style: { display: 'none' } }, '');
   const alertEl = h('div', { class: 'pl-alert' });
+  const flipLabel = h('span', { class: 'pl-hud-flip-label' }, 'Dar vuelta');
+  const flipBtn = h(
+    'button',
+    { class: 'pl-hud-flip', type: 'button', title: 'Dar vuelta la remera (F)', onClick: (e) => onFlip && onFlip(e) },
+    h('span', { class: 'pl-hud-flip-ic', 'aria-hidden': 'true' }, '⟲'),
+    flipLabel,
+    h('span', { class: 'kbd pl-hud-flip-key' }, 'F'),
+  );
   const el = h(
     'div',
     { class: 'pl-hud' },
     h('div', { class: 'hud-title' }, '♨️ Arrugas'),
     h('div', { class: 'pl-sides' }, front.row, back.row),
+    flipBtn,
     h('div', { class: 'pl-therm' }, h('span', { class: 'pl-therm-ic' }, '🌡'), h('span', { class: 'pl-therm-bar' }, thermFill, thermMark), thermTxt),
     h('div', { class: 'pl-flags' }, steamFlag, burnFlag, timeFlag),
     alertEl,
@@ -44,6 +54,15 @@ export function createHud(h) {
   const MAXT = 240;
   return {
     el,
+    flipBtn,
+    // botón de dar vuelta: texto según el lado de arriba, deshabilitado y "latido" cuando conviene
+    setFlip({ up, disabled, pulse }) {
+      set('flip', `${up}|${disabled}|${pulse}`, () => {
+        flipLabel.textContent = up === 'frente' ? 'Dar vuelta: espalda' : 'Dar vuelta: frente';
+        flipBtn.disabled = !!disabled;
+        flipBtn.classList.toggle('pulse', !!pulse && !disabled);
+      });
+    },
     // levels: {frente, espalda} 0..1 ; up: lado que mira arriba
     setSides(levels, up) {
       for (const [s, r] of [['frente', front], ['espalda', back]]) {

@@ -39,7 +39,20 @@ export function createMannequin({ base, neckY = 1.45 }) {
   torsoGeo.scale(1, 1, DEPTH);
   const uv = torsoGeo.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 0.8, uv.getY(i) * 0.6);
-  const linen = getFabricMaterial('lino', '#e2d3b8', { side: THREE.FrontSide });
+  // la base del cuello y el hombro (lo que asoma por el escote) van más oscuros: se leen como sombra
+  const tp = torsoGeo.attributes.position;
+  const shade = new Float32Array(tp.count * 3);
+  const ss = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+  for (let i = 0; i < tp.count; i++) {
+    const y = tp.getY(i);
+    const c = 1 - 0.55 * ss(-0.13, -0.06, y) * (1 - 0.7 * ss(-0.01, 0.03, y));
+    shade[i * 3] = shade[i * 3 + 1] = shade[i * 3 + 2] = c;
+  }
+  torsoGeo.setAttribute('color', new THREE.BufferAttribute(shade, 3));
+  const linen = getFabricMaterial('lino', '#e2d3b8', { side: THREE.FrontSide, vertexColors: true });
   const torso = mesh(torsoGeo, linen, { cast: true, receive: true, p: [0, neckY, 0], name: 'torso' });
   group.add(torso);
   // ribete de costura a los costados del torso (cordón)

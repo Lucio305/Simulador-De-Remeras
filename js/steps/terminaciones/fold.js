@@ -75,6 +75,18 @@ function lineThrough(a, b, away) {
   }
   return L;
 }
+// reflejo respecto de la recta L compuesto con la afín m (formato SVG: a b c d e f)
+function composeReflect(L, m) {
+  const { nx, ny, px, py } = L;
+  const r = [1 - 2 * nx * nx, -2 * nx * ny, -2 * nx * ny, 1 - 2 * ny * ny];
+  const k = 2 * (nx * px + ny * py);
+  const tx = k * nx;
+  const ty = k * ny;
+  const [a, b, c, d, e, f] = m;
+  // R·M: columnas (a,b) y (c,d); traslación R·(e,f) + t
+  return [r[0] * a + r[2] * b, r[1] * a + r[3] * b, r[0] * c + r[2] * d, r[1] * c + r[3] * d, r[0] * e + r[2] * f + tx, r[1] * e + r[3] * f + ty];
+}
+let clipSeq = 0;
 const el = (tag, attrs = {}, parent = null) => {
   const e = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) e.setAttribute(k, v);
@@ -133,7 +145,10 @@ export function createFoldTable(opts) {
     decor.push({ kind: 'stitch', pts: neckBack.map((p) => [p[0], p[1] + 9]) });
   }
 
-  let layers = [{ pts: back, face: 0, decor: decor.map((d) => ({ ...d })) }];
+  // cada capa guarda `m`: la transformación afín (a b c d e f) que lleva el dibujo original de
+  // la espalda a su lugar actual (se compone con cada reflejo), para ubicar la estampa de la espalda
+  const ID = [1, 0, 0, 1, 0, 0];
+  let layers = [{ pts: back, face: 0, decor: decor.map((d) => ({ ...d })), m: ID }];
 
   // ---------- pliegues ----------
   const SP = [c.SP.x * MM, -c.SP.y * MM];
@@ -228,9 +243,25 @@ export function createFoldTable(opts) {
   const packG = el('g', { class: 'tf-pack' }, root);
 
   const fabFill = 'url(#tf-fab)';
+  // estampa de la espalda: boca abajo es lo que se ve (x "vista desde atrás", como el dibujo)
+  const backPrint = printURL && printSide === 'espalda' && printPlacement ? (() => {
+    const pw = printPlacement.width * MM;
+    const ph = pw / (printPlacement.aspect || 1);
+    const cx = printPlacement.x * MM;
+    const cy = -printPlacement.y * MM;
+    return { x: cx - pw / 2, y: cy - ph / 2, w: pw, h: ph, cx, cy, rot: -(printPlacement.rotation || 0) };
+  })() : null;
   function drawLayer(parent, ly, { lift = false } = {}) {
     const g = el('g', { class: `tf-layer face-${ly.face}` }, parent);
     el('path', { d: pathD(ly.pts), fill: fabFill }, g);
+    if (backPrint && ly.face === 0) {
+      const id = `tf-lc-${++clipSeq}`;
+      const cp = el('clipPath', { id }, g);
+      el('path', { d: pathD(ly.pts) }, cp);
+      const ig = el('g', { 'clip-path': `url(#${id})` }, g);
+      const mg = el('g', { transform: `matrix(${(ly.m || ID).map((v) => +v.toFixed(5)).join(' ')})` }, ig);
+      el('image', { href: printURL, x: backPrint.x, y: backPrint.y, width: backPrint.w, height: backPrint.h, preserveAspectRatio: 'xMidYMid meet', transform: `rotate(${backPrint.rot} ${backPrint.cx} ${backPrint.cy})` }, mg);
+    }
     el('path', { d: pathD(ly.pts), fill: ly.face ? 'rgba(255,255,255,0.07)' : 'url(#tf-shade)' }, g);
     for (const d of ly.decor) {
       if (d.poly) el('path', { d: pathD(d.pts), fill: inner, opacity: 0.85 }, g);
@@ -316,8 +347,8 @@ export function createFoldTable(opts) {
           for (const r of clipLine(d.pts, Lf, true)) dm.push({ ...d, pts: r });
         }
       }
-      if (k) keep.push({ pts: k, face: ly.face, decor: dk });
-      if (m) moving.push({ pts: m, face: ly.face, decor: dm });
+      if (k) keep.push({ pts: k, face: ly.face, decor: dk, m: ly.m });
+      if (m) moving.push({ pts: m, face: ly.face, decor: dm, m: ly.m });
     }
     if (!moving.length) return false;
     layers = keep;
@@ -341,7 +372,7 @@ export function createFoldTable(opts) {
           const q = pts[(i + 1) % pts.length];
           if (Math.abs(side(a.Lf, p)) < 0.6 && Math.abs(side(a.Lf, q)) < 0.6 && Math.hypot(q[0] - p[0], q[1] - p[1]) > 8) decor.push({ kind: 'crease', pts: [p, q] });
         }
-        return { pts, face: 1 - ly.face, decor };
+        return { pts, face: 1 - ly.face, decor, m: composeReflect(a.Lf, ly.m) };
       });
     layers = layers.concat(flipped);
     animG.replaceChildren();
@@ -552,17 +583,25 @@ export function createFoldTable(opts) {
     },
     // completa todo de una (modo automático o pruebas)
     finishInstant() {
-      for (const id of api.order()) if (!done.has(id)) {
-        if (anim && anim.kind === 'fold') commitFold(anim);
-        anim = null;
-        busy = false;
-        startFold(id);
-        commitFold(anim);
+      // si había un doblez animándose, se termina primero (antes se volvía a doblar la misma
+      // parte y, sin capas que mover, commitFold recibía null)
+      if (anim && anim.kind === 'fold') commitFold(anim);
+      anim = null;
+      busy = false;
+      queue.length = 0;
+      previewG.replaceChildren();
+      animG.replaceChildren();
+      for (const id of api.order()) {
+        if (done.has(id)) continue;
+        if (startFold(id)) commitFold(anim);
+        else done.add(id);
         anim = null;
         busy = false;
       }
+      hotG.replaceChildren();
       if (!packed) {
         flipped = true;
+        packet.removeAttribute('transform');
         packet.replaceChildren(frontPacket());
         const pk = packagingSVG(packaging);
         packG.replaceChildren(pk.g);

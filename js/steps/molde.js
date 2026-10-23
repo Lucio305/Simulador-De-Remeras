@@ -210,15 +210,43 @@ export default {
       const sw = maxX - minX;
       const sh = maxY - minY + 0.06;
       const wpp = Math.max(sw / Math.max(120, fw * 0.84), sh / Math.max(120, fh * 0.8));
-      const dist = clamp((wpp * H) / (2 * tan), 1.1, 4.2);
+      let dist = clamp((wpp * H) / (2 * tan), 1.1, 4.2);
+      const yaw = mobile ? 0.12 : 0.2;
+      const pitch = 0.1;
+      const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+      // La remera se bambolea (±0,16 rad) y la cámara la mira de costado: la manga que se acerca
+      // se ve más grande que en la silueta plana (manga larga / oversize llegaban al panel). Se
+      // proyectan los puntos del contorno con el giro máximo y se aleja la cámara hasta que entren.
+      {
+        const fwd = dir.clone().negate();
+        const rightV = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+        const cxl = (minX + maxX) / 2;
+        const half = (fw / 2) * 0.95;
+        const k = H / (2 * tan);
+        const pts = out.filter((p, i) => i % 2 === 0);
+        for (let it = 0; it < 24; it++) {
+          let worst = 0;
+          for (const th of [-0.16, 0, 0.16]) {
+            const c = Math.cos(th);
+            const sn = Math.sin(th);
+            for (const p of pts) {
+              // punto girado con la remera (eje en el cuello), relativo al objetivo (centro de la silueta)
+              const x = p.x * c - cxl;
+              const z = -p.x * sn;
+              const sx = x * rightV.x + z * rightV.z;
+              const depth = dist + x * fwd.x + z * fwd.z;
+              worst = Math.max(worst, (Math.abs(sx) / Math.max(0.2, depth)) * k);
+            }
+          }
+          if (worst <= half || dist >= 4.2) break;
+          dist = Math.min(4.2, dist * 1.035);
+        }
+      }
       // corrimiento vertical: el área libre empieza debajo de la barra superior
       const shiftY = ((top - (mobile ? 0 : 6)) / 2) * ((2 * dist * tan) / H);
       const cx = anchor.x + (minX + maxX) / 2;
       const cy = anchor.y + (minY + maxY) / 2 + shiftY * 0.9;
-      const yaw = mobile ? 0.12 : 0.2;
-      const pitch = 0.1;
       const target = new THREE.Vector3(cx, cy, anchor.z);
-      const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
       const position = target.clone().addScaledVector(dir, dist);
       return { view: { position: position.toArray(), target: target.toArray() }, dist };
     }
@@ -310,8 +338,11 @@ export default {
       if (!body) return;
       const br = body.getBoundingClientRect();
       const er = sheetWrap.getBoundingClientRect();
-      const top = body.scrollTop + er.top - br.top - Math.max(8, (br.height - er.height) / 2);
-      body.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' });
+      const top = Math.max(0, body.scrollTop + er.top - br.top - Math.max(8, (br.height - er.height) / 2));
+      const start = body.scrollTop;
+      body.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+      // si el desplazamiento suave no arrancó (navegadores/equipos que no lo animan), va directo
+      if (smooth && Math.abs(top - start) > 4) ctx.timeout(() => body.scrollTop === start && body.scrollTo({ top, behavior: 'auto' }), 250);
     };
     const peek = h(
       'button',
@@ -327,27 +358,39 @@ export default {
       h('span', {}, 'Ver la moldería'),
       h('b', { class: 'molde-peek-arrow', 'aria-hidden': 'true' }, '↓'),
     );
-    const peekWrap = h('div', { class: 'molde-peek-wrap hide' }, peek);
+    // La pestaña va pegada al borde del panel, del lado de la escena (a la izquierda en escritorio,
+    // arriba de la hoja inferior en el celular): así nunca tapa ni intercepta las opciones.
+    peek.classList.add('hide');
+    (ui.panelEl || document.getElementById('app')).appendChild(peek);
+    ctx.track(() => peek.remove());
+    let sheetRatio = 0; // qué parte de la hoja se ve dentro del panel (0..1)
     let sheetSeen = false;
+    // en el celular la indicación de abajo ocupa el mismo lugar: mientras se ve, la pestaña espera
+    let hintOn = false;
+    // hasta la primera medición del observador no se sabe si la hoja se ve: la pestaña espera (sin parpadeo)
+    let measured = typeof IntersectionObserver !== 'function';
+    const updatePeek = () => peek.classList.toggle('hide', !measured || sheetSeen || busy || (hintOn && isMobile()));
     if (typeof IntersectionObserver === 'function') {
       const io = new IntersectionObserver(
         (entries) => {
           for (const en of entries) {
-            // "vista" = al menos 40 % de la hoja adentro del panel (una franjita no alcanza)
-            sheetSeen = en.isIntersecting && en.intersectionRatio >= 0.4;
-            peekWrap.classList.toggle('hide', sheetSeen);
+            measured = true;
+            sheetRatio = en.isIntersecting ? en.intersectionRatio : 0;
+            // si la hoja ya asoma (aunque sea un poco), la pestaña sobra
+            sheetSeen = sheetRatio >= 0.12;
+            updatePeek();
             // la flecha apunta hacia donde quedó la hoja (arriba si ya se pasó de largo)
             const above = en.rootBounds && en.boundingClientRect.top < en.rootBounds.top;
             peek.querySelector('.molde-peek-arrow').textContent = above ? '↑' : '↓';
           }
         },
-        { root: ui.bodyEl || null, threshold: [0, 0.2, 0.4, 0.6, 1] },
+        { root: ui.bodyEl || null, threshold: [0, 0.06, 0.12, 0.25, 0.5, 0.75, 1] },
       );
       io.observe(sheetWrap);
       ctx.track(() => io.disconnect());
-    }
+    } else sheetSeen = true;
     const pulsePeek = () => {
-      if (sheetSeen) return;
+      if (sheetSeen || peek.classList.contains('hide')) return;
       peek.classList.remove('pulse');
       void peek.offsetWidth;
       peek.classList.add('pulse');
@@ -382,7 +425,6 @@ export default {
       ui.section('Moldería', sheetWrap, sheetCap, legend, fabricEl),
       ui.section('Medidas de la prenda terminada', measuresEl, tapeToggle),
       tipsEl,
-      peekWrap,
     );
 
     ui.panel({
@@ -401,7 +443,13 @@ export default {
     ctx.track(() => ui.bodyEl?.scrollTo({ top: ui.bodyEl.scrollTop, behavior: 'instant' }));
     ctx.track(() => ui.panelEl?.classList.remove('molde-step'));
     ui.hint(isMobile() ? 'Tocá las opciones del panel · deslizá la remera para girarla' : 'Elegí en el panel · <kbd>←</kbd> <kbd>→</kbd> cambian de talle · arrastrá la remera para girarla');
-    ctx.timeout(() => ui.hint(null), 9000);
+    hintOn = true;
+    updatePeek();
+    ctx.timeout(() => {
+      ui.hint(null);
+      hintOn = false;
+      updatePeek();
+    }, 9000);
 
     // ---------- cintas métricas ----------
     const tape = createTape({ engine, shirt, THREE, h });
@@ -614,17 +662,19 @@ export default {
         audio.play('select');
       }
       busy = true;
+      updatePeek();
       closeBigSheet();
       ui.enableAction('ok', false);
       ui.enableAction('auto', false);
       ui.hint(null);
+      hintOn = false;
       if (state.pattern.size !== sel.size || state.pattern.fit !== sel.fit || state.pattern.sleeve !== sel.sleeve || state.pattern.neck !== sel.neck || dirty3D) apply3D();
       const pattern = shirt.pattern;
       const meters = fabricEstimate(pattern);
       ctx.addCost('Tela', Math.round(meters * fab.pricePerMeter));
       const { score, notes } = scorePattern(state, { auto });
       // sello sobre la moldería (se lleva la hoja a la vista para verlo) + vuelta completa de la remera
-      const needScroll = !sheetSeen;
+      const needScroll = sheetRatio < 0.6;
       if (needScroll) scrollToSheet();
       const stampDelay = needScroll ? 450 : 0;
       ctx.timeout(() => {
@@ -644,6 +694,20 @@ export default {
       if (!ctx.alive) return;
       await ctx.complete({ score, notes, silent: true });
     }
+
+    // ---------- ayudas para las pruebas automáticas (window.__taller.step._test) ----------
+    ctx.step._test = {
+      get sel() {
+        return { ...sel };
+      },
+      get sheetRatio() {
+        return sheetRatio;
+      },
+      get busy() {
+        return busy;
+      },
+    };
+    ctx.track(() => delete ctx.step._test);
 
     refreshPanel(true);
     tape.build(shirt.pattern);

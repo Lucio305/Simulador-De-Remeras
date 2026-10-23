@@ -24,13 +24,19 @@ export function meltsInsteadOfScorch(fabric) {
   return fabric.id === 'poliester' || fabric.id === 'mezcla' || /poli[eé]ster/i.test(fabric.composition || '');
 }
 
+// Arrugas extra del prelavado (centrifugado fuerte en lino/modal → wrinkleBoost 0.3).
+export const prewashBoost = (prewash) => Math.max(0, +(prewash?.wrinkleBoost || 0));
+
+// "Dureza" de las arrugas: con centrifugado fuerte la tela llega más marcada y cuesta más.
+export const hardnessFor = (prewash) => 1 + prewashBoost(prewash);
+
 // Cuánto se arruga la remera al llegar a la tabla (multiplicador de Shirt3D.setWrinkles).
 // Base del catálogo (tendencia a arrugarse × centrifugado del prelavado), llevada a un rango
-// en el que las arrugas se ven claras en cualquier tela.
-export function wrinkleAmountFor(fabric, prewash) {
-  const boost = prewash?.wrinkleBoost || 0;
-  const raw = (fabric.wrinkle ?? 1) * (1 + boost);
-  return clamp(0.85 + 0.5 * raw, 1.0, 1.5);
+// en el que las arrugas se ven claras en cualquier tela. En colores oscuros el relieve se
+// lleva al máximo (el sombreado casi no se nota en tela negra).
+export function wrinkleAmountFor(fabric, prewash, dark = false) {
+  const raw = (fabric.wrinkle ?? 1) * hardnessFor(prewash);
+  return clamp(0.85 + 0.5 * raw + (dark ? 0.15 : 0), 1.0, 1.5);
 }
 
 // Calentamiento / enfriamiento de la suela (primer orden): ~5 s para llegar, más lento al enfriar.
@@ -51,7 +57,8 @@ export function steamWorks(T, steamOn) {
 }
 
 // Fuerza de alisado por segundo (en el centro de la suela) para la temperatura y el vapor actuales.
-export function smoothRate(fabric, T, Ti, steamActive) {
+// hardness (≥ 1): arrugas más marcadas por el centrifugado del prelavado → más pasadas.
+export function smoothRate(fabric, T, Ti, steamActive, hardness = 1) {
   let temp;
   if (T <= 70) temp = 0;
   else if (T < Ti) temp = Math.pow(clamp((T - 70) / (Ti - 70)), 1.25);
@@ -59,7 +66,7 @@ export function smoothRate(fabric, T, Ti, steamActive) {
   let steam = 1;
   if (steamActive) steam = fabric.ironSteam ? 1.75 : 1.15;
   const difficulty = 1 / Math.pow(Math.max(0.3, fabric.wrinkle ?? 1), 0.55);
-  return 2.3 * temp * steam * difficulty;
+  return (1.3 * temp * steam * difficulty) / Math.max(1, hardness);
 }
 
 // Calor que acumula la tela bajo la suela por segundo. Quieta y a la temperatura justa marca en ~3 s;
@@ -88,8 +95,10 @@ export function levelPoints(level, ideal) {
   return 0;
 }
 
-export function parTime(fabric) {
-  return 42 * (0.8 + 0.2 * (fabric.wrinkle ?? 1));
+// Tiempo esperable de plancha (los dos lados) para alguien prolijo: una recorrida pareja por lado
+// a ritmo de taller. Más largo si el centrifugado la dejó más arrugada.
+export function parTime(fabric, prewash) {
+  return 58 * (0.8 + 0.2 * (fabric.wrinkle ?? 1)) * (1 + 0.6 * prewashBoost(prewash));
 }
 
 // stats: { contact: {1..4: s}, steamContact, contact total, activeTime, burns, melts, sides: {frente, espalda}, flipped }
@@ -146,14 +155,17 @@ export function scoreIroning(catalog, state, fabric, stats, { auto = false } = {
   score += vPts;
 
   // 4) tiempo (10), solo cuenta si la remera quedó bien
-  const par = parTime(fabric);
+  const par = parTime(fabric, state.prewash);
   const t = stats.activeTime;
   const timeFactor = t <= par ? 1 : clamp(1 - (t - par) / (par * 1.5));
   const tmPts = 10 * timeFactor * clamp((smooth - 0.5) / 0.4);
   score += tmPts;
   if (total > 0 && smooth > 0.7 && !auto) {
     if (timeFactor >= 0.99) notes.push(`${OK} Ritmo de taller: ${Math.round(t)} s de plancha.`);
-    else notes.push(`${MID} Tardaste ${Math.round(t)} s (lo esperable es ~${Math.round(par)} s): pasadas largas de punta a punta rinden más que repasar el mismo lugar.`);
+    else {
+      const how = fabric.ironSteam ? 'con la temperatura justa y vapor alcanza una pasada' : 'con la temperatura justa alcanza una pasada pareja';
+      notes.push(`${MID} Tardaste ${Math.round(t)} s (lo esperable es ~${Math.round(par)} s): ${how}, así que podés mover la plancha un poco más rápido y no volver sobre lo que ya quedó liso.`);
+    }
   }
 
   // 5) quemaduras (−15 c/u)
@@ -166,6 +178,8 @@ export function scoreIroning(catalog, state, fabric, stats, { auto = false } = {
     else notes.push(`${NO} ${marks} de <b>quemado</b> (−${burnPenalty}). Nunca dejes la plancha quieta apoyada: cuando pares, llevala al apoya-plancha.`);
   } else if (total > 0) notes.push(`${OK} Ninguna marca de plancha.`);
 
+  if (prewashBoost(state.prewash) > 0) notes.push('🌀 El centrifugado fuerte del prelavado la dejó con arrugas más marcadas: por eso costó más. Con 800 rpm la tela sale más fácil de planchar.');
+
   // tip extra de oficio
   if (catalog.luminance(state.fabric.color) < 0.2 && burns === 0) notes.push('💡 En colores oscuros conviene planchar <b>del revés</b>: así no aparecen brillos en la tela.');
   else if (!fabric.knit) notes.push('💡 El lino se plancha apenas húmedo y bien caliente: es la única forma de que quede lisito.');
@@ -173,7 +187,8 @@ export function scoreIroning(catalog, state, fabric, stats, { auto = false } = {
 
   if (auto) {
     score = clamp(score, 65, 74);
-    notes.unshift(`${MID} La planchó el taller en automático. Probá vos la próxima: con la temperatura justa y vapor sale perfecta.`);
+    const how = fabric.ironSteam ? 'con la temperatura justa y vapor' : 'con la temperatura justa (sin vapor)';
+    notes.unshift(`${MID} La planchó el taller en automático. Probá vos la próxima: ${how} sale perfecta.`);
   }
   score -= burnPenalty; // las marcas cuentan siempre (también si después se terminó en automático)
   return {
