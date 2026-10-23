@@ -69,9 +69,11 @@ function resolveFabric(fabricId) {
 // llevo a un rango donde el brillo rasante se note.
 function sheenParams(fab, weave, hex) {
   const s = clamp(fab.sheen ?? 0.4, 0, 1);
+  // en colores oscuros un sheen muy claro "agrisa" la prenda: se atenúa con la luminancia
+  const lum = new THREE.Color(hex).getHSL({ h: 0, s: 0, l: 0 }).l;
   return {
-    sheen: 0.45 + 0.55 * s,
-    sheenColor: sheenColorFor(hex, 0.3 + 0.3 * s),
+    sheen: 0.3 + 0.4 * s,
+    sheenColor: sheenColorFor(hex, (0.1 + 0.22 * s) * (0.45 + 0.55 * lum)),
     sheenRoughness: WEAVE_DEFS[weave].sheenRoughness,
   };
 }

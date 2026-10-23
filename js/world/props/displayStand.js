@@ -53,9 +53,10 @@ export function createDisplayStand({ base, neck }) {
   const spots = [];
   const lensMats = [];
   const defs = [
-    { x: -0.75, z: railZ, color: '#fff2dc', I: 42, shadow: true },
-    { x: 0.8, z: railZ, color: '#ffe9cf', I: 26, shadow: false },
-    { x: 0.0, z: base[2] - 0.9, color: '#f2f5ff', I: 24, shadow: false, back: true },
+    // luz principal lateral (modela el volumen), relleno suave y contraluz
+    { x: -1.05, z: railZ, color: '#fff2dc', I: 30, shadow: true },
+    { x: 0.95, z: railZ, color: '#ffe9cf', I: 8, shadow: false },
+    { x: 0.0, z: base[2] - 0.9, color: '#f2f5ff', I: 20, shadow: false, back: true },
   ];
   for (const d of defs) {
     const can = new THREE.Group();
