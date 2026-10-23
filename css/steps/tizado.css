@@ -375,6 +375,10 @@
   font-weight: 700;
 }
 
+.tiz-hud-cap > span {
+  display: block;
+}
+
 .tiz-hud-meter {
   position: relative;
   height: 8px;
@@ -694,8 +698,8 @@
     font-size: 10.5px;
   }
 
-  .tiz-hud-cap br {
-    display: none;
+  .tiz-hud-cap > span {
+    display: inline;
   }
 
   .tiz-hud-meter {

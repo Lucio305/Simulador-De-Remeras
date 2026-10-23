@@ -266,7 +266,7 @@ export default {
       'div',
       { class: 'tiz-hud' },
       h('div', { class: 'hud-title' }, '🖍️ Tizado'),
-      h('div', { class: 'tiz-hud-main' }, h('span', { class: 'hud-big tiz-hud-eff' }, '—'), h('span', { class: 'tiz-hud-cap' }, 'de la tela ', h('br'), 'aprovechada')),
+      h('div', { class: 'tiz-hud-main' }, h('span', { class: 'hud-big tiz-hud-eff' }, '—'), h('span', { class: 'tiz-hud-cap' }, h('span', {}, 'de la tela'), ' ', h('span', {}, 'aprovechada'))),
       h('div', { class: 'tiz-hud-meter', title: 'La marca es la meta: la mejor distribución que conocemos para este molde' }, h('i', { class: 'tiz-hud-fill' }), h('b', { class: 'tiz-hud-goal', style: { left: `${Math.round(targetEff * 100)}%` } }, h('span', {}, `meta ${pctTxt(targetEff)}`))),
       h('div', { class: 'tiz-hud-line tiz-hud-len' }),
       h('div', { class: 'tiz-hud-line tiz-hud-count' }),
